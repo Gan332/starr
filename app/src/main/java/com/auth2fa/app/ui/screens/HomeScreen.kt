@@ -18,6 +18,7 @@ import com.auth2fa.app.data.Account
 import com.auth2fa.app.ui.components.AccountCard
 import com.auth2fa.app.viewmodel.AppUiState
 import com.auth2fa.app.viewmodel.SortMode
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +28,7 @@ fun HomeScreen(
     onSearch: (String) -> Unit,
     onCopyCode: (Long) -> Unit,
     onDeleteAccount: (Account) -> Unit,
+    onRestoreAccount: (Long) -> Unit,
     onEditAccount: (Account) -> Unit,
     onAddClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -51,9 +53,12 @@ fun HomeScreen(
     var showBatchMenu by remember { mutableStateOf(false) }
     var showDeleteSelectedConfirm by remember { mutableStateOf(false) }
     var showBatchCategoryDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (uiState.isSelectMode) {
                 TopAppBar(
@@ -242,8 +247,19 @@ fun HomeScreen(
                     text = { Text("确定要删除 ${deleteConfirmAccount?.issuer} 吗？它将移入回收站。") },
                     confirmButton = {
                         TextButton(onClick = {
-                            deleteConfirmAccount?.let { onDeleteAccount(it) }
+                            val account = deleteConfirmAccount!!
                             deleteConfirmAccount = null
+                            onDeleteAccount(account)
+                            scope.launch {
+                                val result = snackbarHostState.showSnackbar(
+                                    message = "${account.issuer} 已移入回收站",
+                                    actionLabel = "撤销",
+                                    duration = SnackbarDuration.Short
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    onRestoreAccount(account.id)
+                                }
+                            }
                         }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("删除") }
                     },
                     dismissButton = { TextButton(onClick = { deleteConfirmAccount = null }) { Text("取消") } }

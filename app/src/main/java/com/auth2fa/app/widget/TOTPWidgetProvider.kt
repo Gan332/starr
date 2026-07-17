@@ -9,6 +9,7 @@ import android.widget.RemoteViews
 import com.auth2fa.app.MainActivity
 import com.auth2fa.app.R
 import com.auth2fa.app.data.AccountRepository
+import com.auth2fa.app.totp.HOTPGenerator
 import com.auth2fa.app.totp.SteamTOTPGenerator
 import com.auth2fa.app.totp.TOTPGenerator
 import kotlinx.coroutines.runBlocking
@@ -59,10 +60,10 @@ class TOTPWidgetProvider : AppWidgetProvider() {
 
                     for ((index, account) in displayAccounts.withIndex()) {
                         val code = try {
-                            if (account.isSteam) {
-                                SteamTOTPGenerator.generate(account.secret, now)
-                            } else {
-                                TOTPGenerator.generate(account.secret, account.digits, account.period, now)
+                            when (account.accountType) {
+                                "STEAM" -> SteamTOTPGenerator.generate(account.secret, now)
+                                "HOTP" -> HOTPGenerator.generate(account.secret, account.hotpCounter, account.digits)
+                                else -> TOTPGenerator.generate(account.secret, account.digits, account.period, now)
                             }
                         } catch (e: Exception) {
                             "ERR"

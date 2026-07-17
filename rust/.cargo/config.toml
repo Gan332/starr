@@ -1,0 +1,14 @@
+# Android NDK cross-compilation targets.
+# Set NDK_HOME environment variable before building.
+
+[target.aarch64-linux-android]
+linker = "NOT_SET_NDK_HOME"
+
+[target.armv7-linux-androideabi]
+linker = "NOT_SET_NDK_HOME"
+
+[target.x86_64-linux-android]
+linker = "NOT_SET_NDK_HOME"
+
+[target.i686-linux-android]
+linker = "NOT_SET_NDK_HOME"

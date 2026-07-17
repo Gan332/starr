@@ -15,15 +15,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 
+import com.auth2fa.app.viewmodel.ThemeMode
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
-    isDarkTheme: Boolean,
+    themeMode: ThemeMode,
+    useMaterialYou: Boolean,
     biometricEnabled: Boolean,
+    pinEnabled: Boolean,
     notificationEnabled: Boolean,
     accountCount: Int,
-    onToggleTheme: () -> Unit,
+    onSetThemeMode: (ThemeMode) -> Unit,
+    onToggleMaterialYou: (Boolean) -> Unit,
     onToggleBiometric: (Boolean) -> Unit,
+    onTogglePin: (Boolean) -> Unit,
+    onSetPin: (String) -> Unit,
+    onRemovePin: () -> Unit,
     onToggleNotification: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
@@ -31,6 +39,17 @@ fun SettingsSheet(
     onCategoryAdminClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showPinSetupDialog by remember { mutableStateOf(false) }
+    var showPinRemoveDialog by remember { mutableStateOf(false) }
+    var pinSetupValue by remember { mutableStateOf("") }
+    var pinSetupError by remember { mutableStateOf("") }
+    var isPinSet by remember { mutableStateOf(false) }
+    var pinCheck by remember { mutableStateOf(false) }
+
+    // Check if PIN is already set
+    LaunchedEffect(Unit) {
+        // We can't directly access ViewModel here, so we'll just rely on the pinEnabled parameter
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -63,20 +82,54 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Theme mode selector
+            Text(
+                text = "主题模式",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ThemeMode.entries.forEach { mode ->
+                    val label = when (mode) {
+                        ThemeMode.LIGHT -> "☀️ 浅色"
+                        ThemeMode.DARK -> "🌙 深色"
+                        ThemeMode.SYSTEM -> "⚙️ 跟随系统"
+                    }
+                    FilterChip(
+                        selected = themeMode == mode,
+                        onClick = { onSetThemeMode(mode) },
+                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             SettingsItem(
-                icon = if (isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
-                title = if (isDarkTheme) "深色模式" else "浅色模式",
+                icon = Icons.Default.Palette,
+                title = "Material You 动态取色",
+                subtitle = "使用系统主题色（Android 12+）",
                 trailing = {
                     Switch(
-                        checked = isDarkTheme,
-                        onCheckedChange = { onToggleTheme() },
+                        checked = useMaterialYou,
+                        onCheckedChange = { onToggleMaterialYou(it) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = MaterialTheme.colorScheme.primary,
                             checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
                         )
                     )
                 },
-                onClick = onToggleTheme
+                onClick = { onToggleMaterialYou(!useMaterialYou) }
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -106,6 +159,31 @@ fun SettingsSheet(
                     )
                 },
                 onClick = { onToggleBiometric(!biometricEnabled) }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Lock,
+                title = "PIN 锁",
+                subtitle = if (pinEnabled) "使用 PIN 码解锁" else "设置 PIN 码保护账户",
+                trailing = {
+                    Switch(
+                        checked = pinEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                showPinSetupDialog = true
+                            } else {
+                                showPinRemoveDialog = true
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                },
+                onClick = {
+                    if (pinEnabled) showPinRemoveDialog = true else showPinSetupDialog = true
+                }
             )
 
             SettingsItem(
@@ -193,6 +271,69 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // PIN Setup Dialog
+    if (showPinSetupDialog) {
+        AlertDialog(
+            onDismissRequest = { showPinSetupDialog = false; pinSetupValue = ""; pinSetupError = "" },
+            title = { Text("设置 PIN 码", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("请输入 4~6 位数字 PIN 码用于解锁应用")
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = pinSetupValue,
+                        onValueChange = {
+                            pinSetupValue = it.filter { c -> c.isDigit() }.take(6)
+                            pinSetupError = ""
+                        },
+                        label = { Text("PIN 码") },
+                        singleLine = true,
+                        isError = pinSetupError.isNotEmpty(),
+                        supportingText = if (pinSetupError.isNotEmpty()) {{ Text(pinSetupError, color = MaterialTheme.colorScheme.error) }} else null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    when {
+                        pinSetupValue.length < 4 -> pinSetupError = "PIN 码至少 4 位"
+                        else -> {
+                            onSetPin(pinSetupValue)
+                            onTogglePin(true)
+                            showPinSetupDialog = false
+                            pinSetupValue = ""
+                            pinSetupError = ""
+                        }
+                    }
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPinSetupDialog = false; pinSetupValue = ""; pinSetupError = "" }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // PIN Remove Confirmation Dialog
+    if (showPinRemoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showPinRemoveDialog = false },
+            title = { Text("关闭 PIN 锁") },
+            text = { Text("确定要关闭 PIN 码锁吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRemovePin()
+                    showPinRemoveDialog = false
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPinRemoveDialog = false }) { Text("取消") }
+            }
+        )
     }
 }
 

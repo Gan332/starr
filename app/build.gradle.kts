@@ -45,6 +45,28 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDirs("src/main/jniLibs")
+        }
+    }
+}
+
+// ─── Rust build integration ───
+// Run: ./gradlew :app:buildRust
+// Or:  ./gradlew :app:assembleDebug (will build Rust first)
+tasks.register<Exec>("buildRust") {
+    workingDir = file("${rootProject.projectDir}/rust")
+    val ndkHome = System.getenv("NDK_HOME") ?: System.getenv("ANDROID_HOME")?.let { "$it/ndk/26.1.10909125" }
+    if (ndkHome != null) {
+        environment("NDK_HOME", ndkHome)
+    }
+    commandLine("powershell", "-ExecutionPolicy", "Bypass", "-File", "build-android.ps1")
+}
+
+tasks.named("preBuild") {
+    dependsOn("buildRust")
 }
 
 dependencies {

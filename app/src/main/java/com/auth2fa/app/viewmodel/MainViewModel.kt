@@ -12,6 +12,8 @@ import com.auth2fa.app.App
 import com.auth2fa.app.data.Account
 import com.auth2fa.app.data.Category
 import com.auth2fa.app.notification.NotificationHelper
+import com.auth2fa.app.totp.HOTPGenerator
+import com.auth2fa.app.totp.SteamTOTPGenerator
 import com.auth2fa.app.totp.TOTPGenerator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
 data class CodeEntry(
     val accountId: Long,
@@ -30,14 +33,17 @@ data class CodeEntry(
 )
 
 enum class SortMode { NAME, RECENT, TYPE }
+enum class ThemeMode { LIGHT, DARK, SYSTEM }
 
 data class AppUiState(
     val accounts: List<Account> = emptyList(),
     val codes: Map<Long, CodeEntry> = emptyMap(),
     val searchQuery: String = "",
-    val isDarkTheme: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.DARK,
+    val useMaterialYou: Boolean = false,
     val accountCount: Int = 0,
     val biometricEnabled: Boolean = false,
+    val pinEnabled: Boolean = false,
     val notificationEnabled: Boolean = false,
     val sortMode: SortMode = SortMode.NAME,
     val showFavoritesOnly: Boolean = false,
@@ -47,7 +53,14 @@ data class AppUiState(
     val selectedIds: Set<Long> = emptySet(),
     val trashedAccounts: List<Account> = emptyList(),
     val allCategoryModels: List<Category> = emptyList()
-)
+) {
+    val isDarkTheme: Boolean
+        get() = when (themeMode) {
+            ThemeMode.DARK -> true
+            ThemeMode.LIGHT -> false
+            ThemeMode.SYSTEM -> false // Runtime will determine, but default to false
+        }
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -69,10 +82,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Load theme preference
         val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val isDark = prefs.getBoolean("dark_theme", true)
+        val themeModeName = prefs.getString("theme_mode", ThemeMode.DARK.name) ?: ThemeMode.DARK.name
+        val themeMode = try { ThemeMode.valueOf(themeModeName) } catch (e: Exception) { ThemeMode.DARK }
+        val useMaterialYou = prefs.getBoolean("material_you", false)
         val biometricEnabled = prefs.getBoolean("biometric_lock", false)
+        val pinEnabled = prefs.getBoolean("pin_enabled", false)
         val notificationEnabled = prefs.getBoolean("notification_enabled", false)
-        _uiState.update { it.copy(isDarkTheme = isDark, biometricEnabled = biometricEnabled, notificationEnabled = notificationEnabled) }
+        _uiState.update { it.copy(themeMode = themeMode, useMaterialYou = useMaterialYou, biometricEnabled = biometricEnabled, pinEnabled = pinEnabled, notificationEnabled = notificationEnabled) }
 
         // Observe accounts with debounced search
         searchCollectionJob = viewModelScope.launch {
@@ -114,9 +130,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         for (account in accounts) {
             try {
-                val code = TOTPGenerator.generate(account.secret, account.digits, account.period, now)
-                val remaining = TOTPGenerator.getTimeRemaining(account.period, now)
-                val progress = TOTPGenerator.getProgress(account.period, now)
+                val (code, remaining, progress) = when (account.accountType) {
+                    "HOTP" -> {
+                        val c = HOTPGenerator.generate(account.secret, account.hotpCounter, account.digits)
+                        // HOTP has no time-based period; use remaining=0, progress=0f
+                        Triple(c, 0, 0f)
+                    }
+                    "STEAM" -> {
+                        val c = SteamTOTPGenerator.generate(account.secret, now)
+                        val r = SteamTOTPGenerator.getTimeRemaining(now)
+                        val p = SteamTOTPGenerator.getProgress(now)
+                        Triple(c, r, p)
+                    }
+                    else -> {
+                        val c = TOTPGenerator.generate(account.secret, account.digits, account.period, now)
+                        val r = TOTPGenerator.getTimeRemaining(account.period, now)
+                        val p = TOTPGenerator.getProgress(account.period, now)
+                        Triple(c, r, p)
+                    }
+                }
                 codes[account.id] = CodeEntry(account.id, code, remaining, progress)
             } catch (e: Exception) {
                 codes[account.id] = CodeEntry(account.id, null, 0, 0f)
@@ -137,13 +169,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = query
     }
 
-    fun addAccount(issuer: String, name: String, secret: String) {
+    fun addAccount(issuer: String, name: String, secret: String, accountType: String = "TOTP", digits: Int = 6) {
         viewModelScope.launch {
             repository.insert(
                 Account(
                     issuer = issuer.trim(),
                     name = name.trim(),
-                    secret = secret.uppercase().replace("[^A-Z2-7]".toRegex(), "")
+                    secret = secret.uppercase().replace("[^A-Z2-7]".toRegex(), ""),
+                    accountType = accountType,
+                    digits = if (accountType == "STEAM") 5 else digits
                 )
             )
         }
@@ -246,9 +280,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleTheme() {
         val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val current = _uiState.value.isDarkTheme
-        prefs.edit().putBoolean("dark_theme", !current).apply()
-        _uiState.update { it.copy(isDarkTheme = !current) }
+        val current = _uiState.value.themeMode
+        val next = when (current) {
+            ThemeMode.LIGHT -> ThemeMode.DARK
+            ThemeMode.DARK -> ThemeMode.SYSTEM
+            ThemeMode.SYSTEM -> ThemeMode.LIGHT
+        }
+        prefs.edit().putString("theme_mode", next.name).apply()
+        _uiState.update { it.copy(themeMode = next) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("theme_mode", mode.name).apply()
+        _uiState.update { it.copy(themeMode = mode) }
+    }
+
+    fun toggleMaterialYou(enabled: Boolean) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("material_you", enabled).apply()
+        _uiState.update { it.copy(useMaterialYou = enabled) }
     }
 
     fun toggleBiometric(enabled: Boolean) {
@@ -276,6 +327,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             true // Below Android 13, no runtime permission needed
         }
+    }
+
+    // --- PIN lock methods ---
+
+    /**
+     * Hash a PIN using SHA-256.
+     */
+    private fun hashPin(pin: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(pin.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Check if a PIN has been set.
+     */
+    fun isPinSet(): Boolean {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        return prefs.contains("pin_hash")
+    }
+
+    /**
+     * Set a new PIN (stores SHA-256 hash).
+     */
+    fun setPin(pin: String) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("pin_hash", hashPin(pin)).apply()
+    }
+
+    /**
+     * Verify the entered PIN against stored hash.
+     */
+    fun verifyPin(pin: String): Boolean {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val storedHash = prefs.getString("pin_hash", null) ?: return false
+        return hashPin(pin) == storedHash
+    }
+
+    /**
+     * Enable or disable PIN lock.
+     * Returns true if the operation succeeded, false if PIN needs to be set first.
+     */
+    fun togglePinEnabled(enabled: Boolean): Boolean {
+        if (enabled && !isPinSet()) return false
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("pin_enabled", enabled).apply()
+        _uiState.update { it.copy(pinEnabled = enabled) }
+        return true
+    }
+
+    /**
+     * Remove the stored PIN and disable PIN lock.
+     */
+    fun removePin() {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().remove("pin_hash").putBoolean("pin_enabled", false).apply()
+        _uiState.update { it.copy(pinEnabled = false) }
     }
 
     // --- HomeScreen callback methods ---
@@ -357,7 +464,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun incrementHotpCounter(accountId: Long) {
-        // HOTP not implemented yet - placeholder
+        viewModelScope.launch {
+            val account = withContext(Dispatchers.IO) { repository.getById(accountId) } ?: return@launch
+            if (account.accountType != "HOTP") return@launch
+            val newCounter = account.hotpCounter + 1
+            withContext(Dispatchers.IO) {
+                repository.updateHotpCounter(accountId, newCounter)
+                repository.update(account.copy(hotpCounter = newCounter))
+            }
+            // Regenerate codes immediately to show the new HOTP code
+            generateAllCodes()
+        }
     }
 
     fun setBatchCategory(category: String) {

@@ -18,6 +18,7 @@ import com.auth2fa.app.biometric.BiometricHelper
 import com.auth2fa.app.ui.screens.AddAccountSheet
 import com.auth2fa.app.ui.screens.CategoryAdminScreen
 import com.auth2fa.app.ui.screens.HomeScreen
+import com.auth2fa.app.ui.screens.PinEntryScreen
 import com.auth2fa.app.ui.screens.SettingsSheet
 import com.auth2fa.app.ui.screens.TrashScreen
 import com.auth2fa.app.ui.theme.Auth2FATheme
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private var pendingExportJson: String = ""
     private var isLocked = false
+    private var isPinLocked = false
 
     private val importLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -92,6 +94,9 @@ class MainActivity : ComponentActivity() {
                 onError = { _, _ -> finish() }
             )
         }
+        if (prefs.getBoolean("pin_enabled", false)) {
+            isPinLocked = true
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -102,14 +107,30 @@ class MainActivity : ComponentActivity() {
             var showCategoryAdmin by remember { mutableStateOf(false) }
 
             Auth2FATheme(
-                themeMode = if (uiState.isDarkTheme) ThemeMode.DARK else ThemeMode.LIGHT
+                themeMode = uiState.themeMode,
+                useMaterialYou = uiState.useMaterialYou
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (isLocked) {
-                        // Blank screen waiting for biometric
+                    if (isLocked || isPinLocked) {
+                        if (isPinLocked) {
+                            var pinError by remember { mutableStateOf("") }
+                            PinEntryScreen(
+                                onPinSubmit = { pin ->
+                                    if (viewModel.verifyPin(pin)) {
+                                        isPinLocked = false
+                                        pinError = ""
+                                    } else {
+                                        pinError = "PIN 码错误，请重试"
+                                    }
+                                },
+                                error = pinError
+                            )
+                        } else {
+                            // Blank screen waiting for biometric
+                        }
                     } else {
                         HomeScreen(
                             uiState = uiState,
@@ -117,6 +138,7 @@ class MainActivity : ComponentActivity() {
                             onSearch = { viewModel.updateSearch(it) },
                             onCopyCode = { viewModel.copyCode(it) },
                             onDeleteAccount = { viewModel.trashAccount(it) },
+                            onRestoreAccount = { viewModel.restoreAccount(it) },
                             onEditAccount = { viewModel.updateAccount(it) },
                             onAddClick = { showAddSheet = true },
                             onSettingsClick = { showSettingsSheet = true },
@@ -150,8 +172,8 @@ class MainActivity : ComponentActivity() {
             if (showAddSheet) {
                 AddAccountSheet(
                     onDismiss = { showAddSheet = false },
-                    onAdd = { issuer, name, secret, _ ->
-                        viewModel.addAccount(issuer, name, secret)
+                    onAdd = { issuer, name, secret, accountType ->
+                        viewModel.addAccount(issuer, name, secret, accountType)
                     },
                     onScannedUri = { uri ->
                         if (viewModel.parseAndAddFromUri(uri)) {
@@ -166,12 +188,18 @@ class MainActivity : ComponentActivity() {
 
             if (showSettingsSheet) {
                 SettingsSheet(
-                    isDarkTheme = uiState.isDarkTheme,
+                    themeMode = uiState.themeMode,
+                    useMaterialYou = uiState.useMaterialYou,
                     biometricEnabled = uiState.biometricEnabled,
+                    pinEnabled = uiState.pinEnabled,
                     notificationEnabled = uiState.notificationEnabled,
                     accountCount = uiState.accountCount,
-                    onToggleTheme = { viewModel.toggleTheme() },
+                    onSetThemeMode = { viewModel.setThemeMode(it) },
+                    onToggleMaterialYou = { viewModel.toggleMaterialYou(it) },
                     onToggleBiometric = { viewModel.toggleBiometric(it) },
+                    onTogglePin = { viewModel.togglePinEnabled(it) },
+                    onSetPin = { viewModel.setPin(it) },
+                    onRemovePin = { viewModel.removePin() },
                     onToggleNotification = {
                         if (it && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -230,8 +258,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (!isLocked && viewModel.uiState.value.biometricEnabled) {
+        if (!isLocked && !isPinLocked && viewModel.uiState.value.biometricEnabled) {
             isLocked = true
+        }
+        if (!isLocked && !isPinLocked && viewModel.uiState.value.pinEnabled) {
+            isPinLocked = true
         }
     }
 
@@ -243,5 +274,7 @@ class MainActivity : ComponentActivity() {
                 onError = { _, _ -> /* stays locked */ }
             )
         }
+        // PIN lock stays active until user enters correct PIN
+        // isPinLocked remains true and PinEntryScreen handles it
     }
 }
