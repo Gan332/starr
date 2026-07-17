@@ -41,7 +41,8 @@ fun HomeScreen(
     onClearSelection: () -> Unit,
     onDeleteSelected: () -> Unit,
     onExportSelected: () -> Unit,
-    onIncrementHotp: (Long) -> Unit
+    onIncrementHotp: (Long) -> Unit,
+    onBatchChangeCategory: (String) -> Unit
 ) {
     var searchText by remember { mutableStateOf("") }
     var deleteConfirmAccount by remember { mutableStateOf<Account?>(null) }
@@ -50,6 +51,7 @@ fun HomeScreen(
     var showCategoryMenu by remember { mutableStateOf(false) }
     var showBatchMenu by remember { mutableStateOf(false) }
     var showDeleteSelectedConfirm by remember { mutableStateOf(false) }
+    var showBatchCategoryDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -76,6 +78,10 @@ fun HomeScreen(
                                 DropdownMenuItem(
                                     text = { Text("导出所选") }, onClick = { showBatchMenu = false; onExportSelected() },
                                     leadingIcon = { Icon(Icons.Default.Upload, null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("更改分类") }, onClick = { showBatchMenu = false; showBatchCategoryDialog = true },
+                                    leadingIcon = { Icon(Icons.Default.Category, null) }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("删除所选") }, onClick = { showBatchMenu = false; showDeleteSelectedConfirm = true },
@@ -255,6 +261,34 @@ fun HomeScreen(
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("删除") }
                     },
                     dismissButton = { TextButton(onClick = { showDeleteSelectedConfirm = false }) { Text("取消") } }
+                )
+            }
+
+            if (showBatchCategoryDialog) {
+                AlertDialog(
+                    onDismissRequest = { showBatchCategoryDialog = false },
+                    title = { Text("批量更改分类") },
+                    text = {
+                        Column {
+                            Text("为 ${uiState.selectedIds.size} 个账户选择新分类：")
+                            Spacer(Modifier.height(12.dp))
+                            TextButton(
+                                onClick = { onBatchChangeCategory(""); showBatchCategoryDialog = false },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("无分类", modifier = Modifier.fillMaxWidth()) }
+                            Divider()
+                            uiState.allCategories.forEach { cat ->
+                                TextButton(
+                                    onClick = { onBatchChangeCategory(cat); showBatchCategoryDialog = false },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text(cat, modifier = Modifier.fillMaxWidth()) }
+                            }
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(onClick = { showBatchCategoryDialog = false }) { Text("取消") }
+                    }
                 )
             }
         }

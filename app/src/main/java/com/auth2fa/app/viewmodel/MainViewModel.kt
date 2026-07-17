@@ -492,6 +492,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setBatchCategory(categoryName: String) {
+        viewModelScope.launch {
+            val ids = _uiState.value.selectedIds.toList()
+            repository.batchSetCategory(ids, categoryName)
+            _uiState.update { it.copy(isSelectMode = false, selectedIds = emptySet()) }
+            refreshCategories()
+        }
+    }
+
     // ---- Export Formats ----
 
     /** Export all accounts as Google Authenticator plaintext URI lines */

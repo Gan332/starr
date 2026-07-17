@@ -193,7 +193,8 @@ class MainActivity : ComponentActivity() {
                                         exportLauncher.launch(intent)
                                     }
                                 },
-                                onIncrementHotp = { viewModel.incrementHotpCounter(it) }
+                                onIncrementHotp = { viewModel.incrementHotpCounter(it) },
+                                onBatchChangeCategory = { viewModel.setBatchCategory(it) }
                             )
                         }
                     }

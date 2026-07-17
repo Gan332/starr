@@ -127,6 +127,9 @@ interface AccountDao {
     @Query("UPDATE accounts SET hotp_counter = :counter WHERE id = :id")
     suspend fun updateHotpCounter(id: Long, counter: Long)
 
+    @Query("UPDATE accounts SET category = :category WHERE id IN (:ids)")
+    suspend fun batchSetCategory(ids: List<Long>, category: String)
+
     @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, createdAt DESC")
     fun getAllRecentFlow(): Flow<List<Account>>
 }
@@ -218,6 +221,7 @@ class AccountRepository(
     suspend fun getAllCategories(): List<String> = dao.getAllCategories()
     suspend fun setFavorite(id: Long, isFavorite: Boolean) = dao.setFavorite(id, isFavorite)
     suspend fun updateHotpCounter(id: Long, counter: Long) = dao.updateHotpCounter(id, counter)
+    suspend fun batchSetCategory(ids: List<Long>, category: String) = dao.batchSetCategory(ids, category)
 
     fun getAllRecentFlow() = dao.getAllRecentFlow()
 
