@@ -30,7 +30,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeInit(
         );
     });
 
-    let path: String = env.get_string(&db_path).unwrap_or_default().into();
+    let path: String = jstr_to_string(&mut env, &db_path);
     match Database::open(std::path::Path::new(&path)) {
         Ok(db) => unsafe {
             DB = Some(db);
@@ -47,6 +47,18 @@ fn db() -> &'static Database {
     unsafe { DB.as_ref().expect("Database not initialized. Call nativeInit first.") }
 }
 
+/// Convert a JString to a Rust String.
+///
+/// `env.get_string()` returns `Result<JavaStr, Error>`, and `JavaStr` does not
+/// implement `Default`, so `.unwrap_or_default()` on the Result does not compile.
+/// Map to String first (via the documented `Into<String>` conversion), then
+/// default to empty on error.
+fn jstr_to_string(env: &mut JNIEnv, s: &JString) -> String {
+    env.get_string(s)
+        .map(|js| String::from(js))
+        .unwrap_or_default()
+}
+
 // ═══════════════════════════════════════════════════
 // TOTP / HOTP / Steam Generation
 // ═══════════════════════════════════════════════════
@@ -60,7 +72,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeGenerateTotp(
     period: jint,
     now_seconds: jlong,
 ) -> jstring {
-    let secret: String = env.get_string(&secret).unwrap_or_default().into();
+    let secret: String = jstr_to_string(&mut env, &secret);
     match totp::generate(&secret, digits as u32, period as u64, now_seconds as u64) {
         Ok(code) => env.new_string(code).unwrap().into_raw(),
         Err(e) => env.new_string(format!("ERR:{}", e)).unwrap().into_raw(),
@@ -75,7 +87,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeGenerateHotp(
     counter: jlong,
     digits: jint,
 ) -> jstring {
-    let secret: String = env.get_string(&secret).unwrap_or_default().into();
+    let secret: String = jstr_to_string(&mut env, &secret);
     match hotp::generate(&secret, counter as u64, digits as u32) {
         Ok(code) => env.new_string(code).unwrap().into_raw(),
         Err(e) => env.new_string(format!("ERR:{}", e)).unwrap().into_raw(),
@@ -89,7 +101,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeGenerateSteam(
     secret: JString,
     now_seconds: jlong,
 ) -> jstring {
-    let secret: String = env.get_string(&secret).unwrap_or_default().into();
+    let secret: String = jstr_to_string(&mut env, &secret);
     match steam::generate(&secret, now_seconds as u64) {
         Ok(code) => env.new_string(code).unwrap().into_raw(),
         Err(e) => env.new_string(format!("ERR:{}", e)).unwrap().into_raw(),
@@ -135,7 +147,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeGetAllAccounts(
 ) -> jstring {
     let accounts = match db().get_all_accounts() {
         Ok(a) => a,
-        Err(e) => return env.new_string(format!("[]")).unwrap().into_raw(),
+        Err(_e) => return env.new_string(format!("[]")).unwrap().into_raw(),
     };
     let json = serde_json::to_string(&accounts).unwrap_or_else(|_| "[]".to_string());
     env.new_string(json).unwrap().into_raw()
@@ -147,7 +159,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeSearchAccounts(
     _class: JClass,
     query: JString,
 ) -> jstring {
-    let query: String = env.get_string(&query).unwrap_or_default().into();
+    let query: String = jstr_to_string(&mut env, &query);
     let accounts = match db().search_accounts(&query) {
         Ok(a) => a,
         Err(_) => return env.new_string("[]").unwrap().into_raw(),
@@ -180,10 +192,10 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeInsertAccount(
     period: jint,
     account_type: JString,
 ) -> jlong {
-    let issuer: String = env.get_string(&issuer).unwrap_or_default().into();
-    let name: String = env.get_string(&name).unwrap_or_default().into();
-    let secret: String = env.get_string(&secret).unwrap_or_default().into();
-    let account_type: String = env.get_string(&account_type).unwrap_or_default().into();
+    let issuer: String = jstr_to_string(&mut env, &issuer);
+    let name: String = jstr_to_string(&mut env, &name);
+    let secret: String = jstr_to_string(&mut env, &secret);
+    let account_type: String = jstr_to_string(&mut env, &account_type);
 
     let cleaned = Account {
         issuer: issuer.trim().to_string(),
@@ -215,7 +227,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeUpdateAccount(
     _class: JClass,
     account_json: JString,
 ) -> jboolean {
-    let json: String = env.get_string(&account_json).unwrap_or_default().into();
+    let json: String = jstr_to_string(&mut env, &account_json);
     match serde_json::from_str::<Account>(&json) {
         Ok(account) => match db().update_account(&account) {
             Ok(()) => true as jboolean,
@@ -310,8 +322,8 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeBatchSetCategory(
     ids_json: JString,
     category: JString,
 ) -> jboolean {
-    let ids_str: String = env.get_string(&ids_json).unwrap_or_default().into();
-    let category: String = env.get_string(&category).unwrap_or_default().into();
+    let ids_str: String = jstr_to_string(&mut env, &ids_json);
+    let category: String = jstr_to_string(&mut env, &category);
     match serde_json::from_str::<Vec<i64>>(&ids_str) {
         Ok(ids) => match db().batch_set_category(&ids, &category) {
             Ok(()) => true as jboolean,
@@ -345,7 +357,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeBatchDeleteAccounts
     _class: JClass,
     ids_json: JString,
 ) -> jboolean {
-    let ids_str: String = env.get_string(&ids_json).unwrap_or_default().into();
+    let ids_str: String = jstr_to_string(&mut env, &ids_json);
     match serde_json::from_str::<Vec<i64>>(&ids_str) {
         Ok(ids) => match db().delete_accounts(&ids) {
             Ok(()) => true as jboolean,
@@ -380,8 +392,8 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeInsertCategory(
     emoji: JString,
     color: jint,
 ) -> jlong {
-    let name: String = env.get_string(&name).unwrap_or_default().into();
-    let emoji: String = env.get_string(&emoji).unwrap_or_default().into();
+    let name: String = jstr_to_string(&mut env, &name);
+    let emoji: String = jstr_to_string(&mut env, &emoji);
     let category = Category {
         name,
         emoji,
@@ -426,7 +438,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeExportSelectedJson(
     _class: JClass,
     ids_json: JString,
 ) -> jstring {
-    let ids_str: String = env.get_string(&ids_json).unwrap_or_default().into();
+    let ids_str: String = jstr_to_string(&mut env, &ids_json);
     let all = db().get_all_accounts().unwrap_or_default();
     if let Ok(ids) = serde_json::from_str::<Vec<i64>>(&ids_str) {
         let selected: Vec<Account> = all.into_iter().filter(|a| ids.contains(&a.id)).collect();
@@ -443,7 +455,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeImportJson(
     _class: JClass,
     json_str: JString,
 ) -> jint {
-    let json: String = env.get_string(&json_str).unwrap_or_default().into();
+    let json: String = jstr_to_string(&mut env, &json_str);
     match export::import_accounts(&json) {
         Ok(accounts) => {
             let count = accounts.len() as i32;
@@ -472,7 +484,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeHashPin(
     _class: JClass,
     pin: JString,
 ) -> jstring {
-    let pin: String = env.get_string(&pin).unwrap_or_default().into();
+    let pin: String = jstr_to_string(&mut env, &pin);
     let hash = crypto::hash_pin(&pin);
     env.new_string(hash).unwrap().into_raw()
 }
@@ -484,8 +496,8 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeVerifyPin(
     pin: JString,
     stored_hash: JString,
 ) -> jboolean {
-    let pin: String = env.get_string(&pin).unwrap_or_default().into();
-    let hash: String = env.get_string(&stored_hash).unwrap_or_default().into();
+    let pin: String = jstr_to_string(&mut env, &pin);
+    let hash: String = jstr_to_string(&mut env, &stored_hash);
     crypto::verify_pin(&pin, &hash) as jboolean
 }
 
@@ -500,7 +512,7 @@ pub extern "C" fn Java_com_auth2fa_app_rust_RustBridge_nativeParseAndAddUri(
     _class: JClass,
     uri: JString,
 ) -> jlong {
-    let uri: String = env.get_string(&uri).unwrap_or_default().into();
+    let uri: String = jstr_to_string(&mut env, &uri);
 
     if !uri.starts_with("otpauth://") {
         return -1;
