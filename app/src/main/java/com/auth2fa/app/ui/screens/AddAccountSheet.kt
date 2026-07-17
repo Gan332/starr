@@ -22,7 +22,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.auth2fa.app.ui.components.QRScanner
-import com.auth2fa.app.ui.theme.*
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

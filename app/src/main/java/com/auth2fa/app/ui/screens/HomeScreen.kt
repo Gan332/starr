@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.auth2fa.app.data.Account
 import com.auth2fa.app.ui.components.AccountCard
-import com.auth2fa.app.ui.theme.*
 import com.auth2fa.app.viewmodel.AppUiState
 import com.auth2fa.app.viewmodel.SortMode
 
