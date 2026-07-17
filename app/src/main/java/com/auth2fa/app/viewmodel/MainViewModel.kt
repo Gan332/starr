@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.auth2fa.app.App
 import com.auth2fa.app.data.Account
 import com.auth2fa.app.data.AccountRepository
+import com.auth2fa.app.data.Category
 import com.auth2fa.app.data.CryptoUtils
 import com.auth2fa.app.totp.HOTPGenerator
 import com.auth2fa.app.totp.SteamTOTPGenerator
@@ -44,13 +45,18 @@ data class AppUiState(
     val biometricEnabled: Boolean = false,
     val autoLockEnabled: Boolean = false,
     val pinEnabled: Boolean = false,
-    val sortMode: SortMode = SortMode.NAME,
     val selectedCategory: String = "",
     val allCategories: List<String> = emptyList(),
+    val showFavoritesOnly: Boolean = false,
+    val categoryModels: List<Category> = emptyList(),
     val isSelectMode: Boolean = false,
     val selectedIds: Set<Long> = emptySet(),
     val timeCorrection: Long = 0L,
-    val isMaterialYou: Boolean = false
+    val isMaterialYou: Boolean = false,
+    // WebDAV config
+    val webdavUrl: String = "",
+    val webdavUser: String = "",
+    val webdavPassword: String = ""
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -74,6 +80,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val pinEnabled = prefs.getBoolean("pin_enabled", false)
         val timeCorrection = prefs.getLong("time_correction", 0L)
         val isMaterialYou = prefs.getBoolean("material_you", false)
+        val webdavUrl = prefs.getString("webdav_url", "") ?: ""
+        val webdavUser = prefs.getString("webdav_user", "") ?: ""
+        val webdavPassword = prefs.getString("webdav_password", "") ?: ""
 
         _uiState.update {
             it.copy(
@@ -82,7 +91,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 autoLockEnabled = autoLockEnabled,
                 pinEnabled = pinEnabled,
                 timeCorrection = timeCorrection,
-                isMaterialYou = isMaterialYou
+                isMaterialYou = isMaterialYou,
+                webdavUrl = webdavUrl,
+                webdavUser = webdavUser,
+                webdavPassword = webdavPassword
             )
         }
 
@@ -90,10 +102,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         searchCollectionJob = viewModelScope.launch {
             combine(
                 _searchQuery.debounce(300),
-                _uiState.map { it.selectedCategory }.distinctUntilChanged()
-            ) { query, category -> Pair(query, category) }
-                .flatMapLatest { (query, category) ->
+                _uiState.map { it.selectedCategory }.distinctUntilChanged(),
+                _uiState.map { it.showFavoritesOnly }.distinctUntilChanged()
+            ) { query, category, favOnly -> Triple(query, category, favOnly) }
+                .flatMapLatest { (query, category, favOnly) ->
                     val flow = when {
+                        favOnly && query.isNotBlank() -> repository.searchFavorites(query)
+                        favOnly -> repository.getFavorites()
                         query.isNotBlank() -> repository.search(query)
                         category.isNotBlank() -> repository.getByCategory(category)
                         else -> repository.allAccounts
@@ -118,10 +133,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Observe categories
+        viewModelScope.launch {
+            repository.allCategories.collect { cats ->
+                _uiState.update { it.copy(categoryModels = cats) }
+            }
+        }
+
         refreshCategories()
         startTicking()
     }
-
     // ---- TOTP/HOTP Code Generation ----
 
     private fun startTicking() {
@@ -204,6 +225,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             refreshCategories()
         }
+    }
+
+    fun toggleFavoritesOnly() {
+        _uiState.update { it.copy(showFavoritesOnly = !it.showFavoritesOnly) }
     }
 
     fun updateAccount(account: Account) {
@@ -432,39 +457,171 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedIds = emptySet()) }
     }
 
-    // ---- Theme ----
+    // ---- Category CRUD ----
 
-    fun cycleTheme() {
-        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val modes = ThemeMode.entries
-        val current = _uiState.value.themeMode
-        val next = modes[(current.ordinal + 1) % modes.size]
-        prefs.edit().putInt("theme_mode", next.ordinal).apply()
-        _uiState.update { it.copy(themeMode = next) }
-    }
-
-    fun toggleMaterialYou() {
-        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val current = _uiState.value.isMaterialYou
-        prefs.edit().putBoolean("material_you", !current).apply()
-        _uiState.update { it.copy(isMaterialYou = !current) }
-    }
-
-    // ---- Biometric & PIN ----
-
-    fun toggleBiometric(enabled: Boolean) {
-        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
-        prefs.edit().putBoolean("biometric_lock", enabled).apply()
-        _uiState.update { it.copy(biometricEnabled = enabled) }
-        if (!enabled && !_uiState.value.pinEnabled) {
-            // No lock enabled
+    fun addCategory(name: String, emoji: String = "", color: Int = 0) {
+        viewModelScope.launch {
+            repository.insertCategory(Category(name = name, emoji = emoji, color = color))
         }
     }
 
-    fun toggleAutoLock(enabled: Boolean) {
+    fun updateCategory(category: Category) {
+        viewModelScope.launch {
+            repository.updateCategory(category)
+        }
+    }
+
+    fun deleteCategory(category: Category) {
+        viewModelScope.launch {
+            // Clear category from accounts using this category
+            val accounts = repository.getAllList()
+            for (acc in accounts.filter { it.category == category.name }) {
+                repository.update(acc.copy(category = ""))
+            }
+            repository.deleteCategory(category)
+            refreshCategories()
+        }
+    }
+
+    fun setAccountCategory(accountId: Long, categoryName: String) {
+        viewModelScope.launch {
+            val acc = repository.getById(accountId) ?: return@launch
+            repository.update(acc.copy(category = categoryName))
+            refreshCategories()
+        }
+    }
+
+    // ---- Export Formats ----
+
+    /** Export all accounts as Google Authenticator plaintext URI lines */
+    fun exportToGoogleAuth(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val accounts = repository.getAllList()
+            val lines = accounts.joinToString("\n") { a ->
+                val type = when (a.accountType) {
+                    "HOTP" -> "hotp"
+                    else -> "totp"
+                }
+                val label = if (a.name.isNotEmpty()) "${a.issuer}:${a.name}" else a.issuer
+                val encodedLabel = java.net.URLEncoder.encode(label, "UTF-8")
+                val encodedIssuer = java.net.URLEncoder.encode(a.issuer, "UTF-8")
+                "otpauth://$type/$encodedLabel?secret=${a.secret}&issuer=$encodedIssuer&digits=${a.digits}" +
+                    if (a.accountType == "HOTP") "&counter=${a.hotpCounter}" else "&period=${a.period}"
+            }
+            onResult(lines)
+        }
+    }
+
+    /** Export all accounts in Aegis JSON format */
+    fun exportToAegis(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val accounts = repository.getAllList()
+            val arr = JSONArray()
+            for (a in accounts) {
+                val entry = JSONObject()
+                val type = when (a.accountType) {
+                    "HOTP" -> "hotp"
+                    "STEAM" -> "steam"
+                    else -> "totp"
+                }
+                val info = JSONObject()
+                info.put("secret", a.secret)
+                info.put("algo", "SHA1")
+                info.put("digits", a.digits)
+                if (a.accountType == "HOTP") {
+                    info.put("counter", a.hotpCounter)
+                } else {
+                    info.put("period", a.period)
+                }
+                entry.put("type", type)
+                entry.put("uuid", java.util.UUID.randomUUID().toString())
+                entry.put("name", if (a.name.isNotEmpty()) "${a.issuer} ($a.name)" else a.issuer)
+                entry.put("issuer", a.issuer)
+                entry.put("note", a.note)
+                entry.put("icon", null as String?)
+                entry.put("info", info)
+                arr.put(entry)
+            }
+            val root = JSONObject()
+            root.put("version", 1)
+            root.put("entries", arr)
+            onResult(root.toString(2))
+        }
+    }
+
+    // ---- WebDAV Sync ----
+
+    fun saveWebdavConfig(url: String, user: String, password: String) {
         val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
-        prefs.edit().putBoolean("auto_lock", enabled).apply()
-        _uiState.update { it.copy(autoLockEnabled = enabled) }
+        prefs.edit()
+            .putString("webdav_url", url)
+            .putString("webdav_user", user)
+            .putString("webdav_password", password)
+            .apply()
+        _uiState.update { it.copy(webdavUrl = url, webdavUser = user, webdavPassword = password) }
+    }
+
+    /** Upload encrypted backup to WebDAV. Returns error string or null on success. */
+    fun uploadToWebdav(password: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val state = _uiState.value
+                if (state.webdavUrl.isBlank()) { onResult("未配置 WebDAV"); return@launch }
+                val accounts = repository.getAllList()
+                val json = buildExportJson(accounts)
+                val encrypted = CryptoUtils.encrypt(json, password) ?: run {
+                    onResult("加密失败"); return@launch
+                }
+
+                val url = java.net.URL(state.webdavUrl.trimEnd('/') + "/2fa-backup.enc")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "PUT"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/octet-stream")
+                val auth = state.webdavUser + ":" + state.webdavPassword
+                val encoded = Base64.getEncoder().encodeToString(auth.toByteArray())
+                conn.setRequestProperty("Authorization", "Basic $encoded")
+                conn.outputStream.use { it.write(encrypted.toByteArray()) }
+                val code = conn.responseCode
+                conn.disconnect()
+                onResult(if (code in 200..299) null else "上传失败: HTTP $code")
+            } catch (e: Exception) {
+                onResult("上传错误: ${e.message}")
+            }
+        }
+    }
+
+    /** Download encrypted backup from WebDAV. */
+    fun downloadFromWebdav(password: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val state = _uiState.value
+                if (state.webdavUrl.isBlank()) { onResult("未配置 WebDAV"); return@launch }
+
+                val url = java.net.URL(state.webdavUrl.trimEnd('/') + "/2fa-backup.enc")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "GET"
+                val auth = state.webdavUser + ":" + state.webdavPassword
+                val encoded = Base64.getEncoder().encodeToString(auth.toByteArray())
+                conn.setRequestProperty("Authorization", "Basic $encoded")
+
+                val code = conn.responseCode
+                if (code !in 200..299) {
+                    conn.disconnect()
+                    onResult("下载失败: HTTP $code"); return@launch
+                }
+                val encrypted = conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                conn.disconnect()
+
+                val json = CryptoUtils.decrypt(encrypted, password)
+                if (json == null) { onResult("密码错误"); return@launch }
+                importFromJson(json) { count ->
+                    onResult(if (count > 0) null else "未导入任何账户")
+                }
+            } catch (e: Exception) {
+                onResult("下载错误: ${e.message}")
+            }
+        }
     }
 
     // ---- PIN Management ----

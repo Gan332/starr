@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
             }
             var pinEntryError by remember { mutableStateOf("") }
 
+            var showCategoryAdmin by remember { mutableStateOf(false) }
 
             Auth2FATheme(
                 themeMode = uiState.themeMode,
@@ -175,6 +176,7 @@ class MainActivity : ComponentActivity() {
                                 onToggleFavorite = { viewModel.toggleFavorite(it) },
                                 onSetSortMode = { viewModel.setSortMode(it) },
                                 onSelectCategory = { viewModel.setSelectedCategory(it) },
+                                onToggleFavoritesFilter = { viewModel.toggleFavoritesOnly() },
                                 onToggleSelectMode = { viewModel.toggleSelectMode() },
                                 onToggleSelectId = { viewModel.toggleSelectId(it) },
                                 onSelectAll = { viewModel.selectAll() },
@@ -269,7 +271,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // Settings sheet
             if (showSettingsSheet) {
                 SettingsSheet(
                     themeMode = uiState.themeMode,
@@ -279,6 +280,10 @@ class MainActivity : ComponentActivity() {
                     isMaterialYou = uiState.isMaterialYou,
                     accountCount = uiState.accountCount,
                     timeCorrection = uiState.timeCorrection,
+                    showFavoritesOnly = uiState.showFavoritesOnly,
+                    webdavUrl = uiState.webdavUrl,
+                    webdavUser = uiState.webdavUser,
+                    webdavPassword = uiState.webdavPassword,
                     onCycleTheme = { viewModel.cycleTheme() },
                     onToggleBiometric = { viewModel.toggleBiometric(it) },
                     onToggleAutoLock = { viewModel.toggleAutoLock(it) },
@@ -313,12 +318,56 @@ class MainActivity : ComponentActivity() {
                     onEncryptedImport = {
                         encryptedImportLauncher.launch("application/octet-stream")
                     },
+                    onExportGoogleAuth = {
+                        viewModel.exportToGoogleAuth { json ->
+                            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                type = "text/plain"
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                putExtra(Intent.EXTRA_TITLE, "2fa-google-auth.txt")
+                            }
+                            pendingExportJson = json
+                            exportLauncher.launch(intent)
+                        }
+                    },
+                    onExportAegis = {
+                        viewModel.exportToAegis { json ->
+                            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                type = "application/json"
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                putExtra(Intent.EXTRA_TITLE, "2fa-aegis.json")
+                            }
+                            pendingExportJson = json
+                            exportLauncher.launch(intent)
+                        }
+                    },
+                    onCategoryAdmin = {
+                        showSettingsSheet = false
+                        showCategoryAdmin = true
+                    },
+                    onWebdavConfig = { url, user, password ->
+                        viewModel.saveWebdavConfig(url, user, password)
+                    },
+                    onToggleFavoritesFilter = { viewModel.toggleFavoritesOnly() },
                     onTrashClick = { showSettingsSheet = false; showTrashScreen = true },
                     onSetPin = { pin -> viewModel.setPin(pin) },
                     onVerifyPin = { pin -> viewModel.verifyPin(pin) },
                     onDisablePin = { viewModel.disablePin() },
                     onSetTimeCorrection = { viewModel.setTimeCorrection(it) },
                     onDismiss = { showSettingsSheet = false }
+                )
+            }
+
+            // Category admin screen
+            if (showCategoryAdmin) {
+                CategoryAdminScreen(
+                    categories = uiState.categoryModels,
+                    onAdd = { name, emoji, color -> viewModel.addCategory(name, emoji, color) },
+                    onDelete = { category -> viewModel.deleteCategory(category) },
+                    onSelect = { categoryName ->
+                        viewModel.setSelectedCategory(categoryName)
+                        showCategoryAdmin = false
+                    },
+                    onDismiss = { showCategoryAdmin = false }
                 )
             }
         }

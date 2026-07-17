@@ -21,11 +21,20 @@ data class Account(
     @ColumnInfo(name = "note") val note: String = "",
     @ColumnInfo(name = "custom_emoji") val customEmoji: String = "",
     @ColumnInfo(name = "custom_color") val customColor: Int = 0,
-    @ColumnInfo(name = "account_type") val accountType: String = "TOTP",
+    @ColumnInfo(name = "tags") val tags: String = "",
     @ColumnInfo(name = "hotp_counter") val hotpCounter: Long = 0,
     @ColumnInfo(name = "is_trashed") val isTrashed: Boolean = false,
     @ColumnInfo(name = "trashed_at") val trashedAt: Long? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "categories")
+data class Category(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "emoji") val emoji: String = "",
+    @ColumnInfo(name = "color") val color: Int = 0,
+    @ColumnInfo(name = "sort_order") val sortOrder: Int = 0
 )
 
 @Dao
@@ -40,8 +49,26 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, createdAt DESC")
     suspend fun getAllByRecent(): List<Account>
 
-    @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND (issuer LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%') ORDER BY is_favorite DESC, issuer ASC")
+    @Query("""
+        SELECT * FROM accounts WHERE is_trashed = 0 AND (
+            issuer LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%'
+            OR note LIKE '%' || :query || '%' OR secret LIKE '%' || :query || '%'
+            OR tags LIKE '%' || :query || '%'
+        ) ORDER BY is_favorite DESC, issuer ASC
+    """)
     fun search(query: String): Flow<List<Account>>
+
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND is_favorite = 1 ORDER BY issuer ASC")
+    fun getFavorites(): Flow<List<Account>>
+
+    @Query("""
+        SELECT * FROM accounts WHERE is_trashed = 0 AND (
+            issuer LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%'
+            OR note LIKE '%' || :query || '%' OR secret LIKE '%' || :query || '%'
+            OR tags LIKE '%' || :query || '%'
+        ) AND is_favorite = 1 ORDER BY is_favorite DESC, issuer ASC
+    """)
+    fun searchFavorites(query: String): Flow<List<Account>>
 
     @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND category = :category ORDER BY is_favorite DESC, issuer ASC")
     fun getByCategory(category: String): Flow<List<Account>>
@@ -102,9 +129,35 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, createdAt DESC")
     fun getAllRecentFlow(): Flow<List<Account>>
 }
-@Database(entities = [Account::class], version = 3, exportSchema = false)
+
+@Dao
+interface CategoryDao {
+    @Query("SELECT * FROM categories ORDER BY sort_order ASC, name ASC")
+    fun getAll(): Flow<List<Category>>
+
+    @Query("SELECT * FROM categories ORDER BY sort_order ASC, name ASC")
+    suspend fun getAllList(): List<Category>
+
+    @Query("SELECT * FROM categories WHERE name = :name LIMIT 1")
+    suspend fun getByName(name: String): Category?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(category: Category): Long
+
+    @Update
+    suspend fun update(category: Category)
+
+    @Delete
+    suspend fun delete(category: Category)
+
+    @Query("DELETE FROM categories WHERE id = :id")
+    suspend fun deleteById(id: Long)
+}
+
+@Database(entities = [Account::class, Category::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
+    abstract fun categoryDao(): CategoryDao
 
     companion object {
         @Volatile
@@ -128,12 +181,17 @@ abstract class AppDatabase : RoomDatabase() {
 /**
  * Repository that wraps database operations.
  */
-class AccountRepository(private val dao: AccountDao) {
-
+class AccountRepository(
+    private val dao: AccountDao,
+    private val categoryDao: CategoryDao
+) {
     val allAccounts = dao.getAll()
     val trashedAccounts = dao.getTrashed()
+    val allCategories = categoryDao.getAll()
 
     fun search(query: String) = dao.search(query)
+    fun getFavorites() = dao.getFavorites()
+    fun searchFavorites(query: String) = dao.searchFavorites(query)
     fun getByCategory(category: String) = dao.getByCategory(category)
 
     suspend fun insert(account: Account): Long = dao.insert(account)
@@ -162,6 +220,14 @@ class AccountRepository(private val dao: AccountDao) {
 
     fun getAllRecentFlow() = dao.getAllRecentFlow()
 
+    // Category operations
+    suspend fun insertCategory(category: Category): Long = categoryDao.insert(category)
+    suspend fun updateCategory(category: Category) = categoryDao.update(category)
+    suspend fun deleteCategory(category: Category) = categoryDao.delete(category)
+    suspend fun deleteCategoryById(id: Long) = categoryDao.deleteById(id)
+    suspend fun getCategoryByName(name: String): Category? = categoryDao.getByName(name)
+    suspend fun getAllCategoriesList(): List<Category> = categoryDao.getAllList()
+
     companion object {
         @Volatile
         private var INSTANCE: AccountRepository? = null
@@ -169,7 +235,8 @@ class AccountRepository(private val dao: AccountDao) {
         fun getInstance(context: Context): AccountRepository {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: AccountRepository(
-                    AppDatabase.getInstance(context).accountDao()
+                    AppDatabase.getInstance(context).accountDao(),
+                    AppDatabase.getInstance(context).categoryDao()
                 ).also { INSTANCE = it }
             }
         }

@@ -44,6 +44,15 @@ fun SettingsSheet(
     onVerifyPin: (String) -> Boolean,
     onDisablePin: () -> Unit,
     onSetTimeCorrection: (Long) -> Unit,
+    onExportGoogleAuth: () -> Unit,
+    onExportAegis: () -> Unit,
+    onCategoryAdmin: () -> Unit,
+    onWebdavConfig: (String, String, String) -> Unit,
+    webdavUrl: String,
+    webdavUser: String,
+    webdavPassword: String,
+    showFavoritesOnly: Boolean,
+    onToggleFavoritesFilter: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var showPinDialog by remember { mutableStateOf(false) }
@@ -57,6 +66,11 @@ fun SettingsSheet(
     var encryptError by remember { mutableStateOf("") }
     var showTimeCorrectionDialog by remember { mutableStateOf(false) }
     var timeCorrectionInput by remember { mutableStateOf(timeCorrection.toString()) }
+    var showWebdavDialog by remember { mutableStateOf(false) }
+    var webdavUrlInput by remember { mutableStateOf(webdavUrl) }
+    var webdavUserInput by remember { mutableStateOf(webdavUser) }
+    var webdavPasswordInput by remember { mutableStateOf(webdavPassword) }
+    var webdavPasswordVisible by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -236,8 +250,73 @@ fun SettingsSheet(
                 onClick = { showEncryptImportDialog = true }
             )
 
+            // Export Format
+            Text(
+                text = "导出格式",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsItem(
+                icon = Icons.Default.Share,
+                title = "导出为 Google Authenticator 格式",
+                subtitle = "兼容 Google Authenticator 导入",
+                onClick = {
+                    onExportGoogleAuth()
+                    onDismiss()
+                }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Lock,
+                title = "导出为 Aegis 格式",
+                subtitle = "兼容 Aegis Authenticator 导入",
+                onClick = {
+                    onExportAegis()
+                    onDismiss()
+                }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsItem(
+                icon = Icons.Default.Favorite,
+                title = "仅显示收藏",
+                subtitle = if (showFavoritesOnly) "已启用" else "已关闭",
+                trailing = {
+                    Switch(
+                        checked = showFavoritesOnly,
+                        onCheckedChange = { onToggleFavoritesFilter() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                },
+                onClick = onToggleFavoritesFilter
+            )
+
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Cloud Sync
+            Text(
+                text = "云同步",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsItem(
+                icon = Icons.Default.Refresh,
+                title = "WebDAV 同步",
+                subtitle = if (webdavUrl.isNotEmpty()) "已配置" else "未配置",
+                onClick = { showWebdavDialog = true }
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
             // Maintenance
             Text(
                 text = "维护",
@@ -252,6 +331,16 @@ fun SettingsSheet(
                 title = "回收站",
                 subtitle = "管理已删除的账户",
                 onClick = onTrashClick
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Folder,
+                title = "分类管理",
+                subtitle = "创建和管理分类",
+                onClick = {
+                    onCategoryAdmin()
+                    onDismiss()
+                }
             )
 
             SettingsItem(
@@ -484,6 +573,64 @@ fun SettingsSheet(
             },
             dismissButton = {
                 TextButton(onClick = { showTimeCorrectionDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // ---- WebDAV Config Dialog ----
+    if (showWebdavDialog) {
+        AlertDialog(
+            onDismissRequest = { showWebdavDialog = false },
+            title = { Text("WebDAV 配置") },
+            text = {
+                Column {
+                    Text("配置 WebDAV 服务器以同步数据")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = webdavUrlInput,
+                        onValueChange = { webdavUrlInput = it },
+                        label = { Text("服务器地址") },
+                        placeholder = { Text("https://example.com/remote.php/dav/files/") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = webdavUserInput,
+                        onValueChange = { webdavUserInput = it },
+                        label = { Text("用户名") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = webdavPasswordInput,
+                        onValueChange = { webdavPasswordInput = it },
+                        label = { Text("密码") },
+                        visualTransformation = if (webdavPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { webdavPasswordVisible = !webdavPasswordVisible }) {
+                                Icon(
+                                    imageVector = if (webdavPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (webdavPasswordVisible) "隐藏密码" else "显示密码"
+                                )
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onWebdavConfig(webdavUrlInput, webdavUserInput, webdavPasswordInput)
+                    showWebdavDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWebdavDialog = false }) { Text("取消") }
             }
         )
     }

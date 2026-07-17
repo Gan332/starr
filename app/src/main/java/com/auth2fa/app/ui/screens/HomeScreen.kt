@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ fun HomeScreen(
     onToggleFavorite: (Long) -> Unit,
     onSetSortMode: (SortMode) -> Unit,
     onSelectCategory: (String) -> Unit,
+    onToggleFavoritesFilter: () -> Unit,
     onToggleSelectMode: () -> Unit,
     onToggleSelectId: (Long) -> Unit,
     onSelectAll: () -> Unit,
@@ -171,6 +173,19 @@ fun HomeScreen(
                             }
                         }
                     }
+
+                    AssistChip(
+                        onClick = onToggleFavoritesFilter,
+                        label = { Text(if (uiState.showFavoritesOnly) "仅收藏" else "全部", style = MaterialTheme.typography.labelSmall) },
+                        leadingIcon = {
+                            Icon(
+                                if (uiState.showFavoritesOnly) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                                null,
+                                Modifier.size(16.dp)
+                            )
+                        },
+                        shape = MaterialTheme.shapes.small
+                    )
 
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = onToggleSelectMode, modifier = Modifier.size(32.dp)) {

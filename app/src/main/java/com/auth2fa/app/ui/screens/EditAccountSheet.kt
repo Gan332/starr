@@ -34,6 +34,7 @@ fun EditAccountSheet(
     var customColor by remember { mutableStateOf(account.customColor) }
     var category by remember { mutableStateOf(account.category) }
     var note by remember { mutableStateOf(account.note) }
+    var tags by remember { mutableStateOf(account.tags) }
 
     val isFormValid = issuer.isNotBlank()
 
@@ -152,6 +153,24 @@ fun EditAccountSheet(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
             )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Tags
+            OutlinedTextField(
+                value = tags,
+                onValueChange = { tags = it },
+                label = { Text("标签") },
+                placeholder = { Text("用逗号分隔多个标签") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -166,7 +185,8 @@ fun EditAccountSheet(
                                 customEmoji = customEmoji.trim(),
                                 customColor = customColor,
                                 category = category.trim(),
-                                note = note.trim()
+                                note = note.trim(),
+                                tags = tags.trim(),
                             )
                         )
                         onDismiss()
