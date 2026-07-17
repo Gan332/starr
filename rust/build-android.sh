@@ -51,25 +51,42 @@ for target in "${!TARGETS[@]}"; do
     abi="${TARGETS[$target]}"
     case $target in
         aarch64-linux-android)
-            CC="$NDK_HOME/toolchains/llvm/prebuilt/$PREBUILT/bin/aarch64-linux-android${ANDROID_API}-clang${HOST_EXT}"
+            CLANG_PREFIX="aarch64-linux-android"
             ;;
         armv7-linux-androideabi)
-            CC="$NDK_HOME/toolchains/llvm/prebuilt/$PREBUILT/bin/armv7a-linux-androideabi${ANDROID_API}-clang${HOST_EXT}"
+            CLANG_PREFIX="armv7a-linux-androideabi"
             ;;
         x86_64-linux-android)
-            CC="$NDK_HOME/toolchains/llvm/prebuilt/$PREBUILT/bin/x86_64-linux-android${ANDROID_API}-clang${HOST_EXT}"
+            CLANG_PREFIX="x86_64-linux-android"
             ;;
         i686-linux-android)
-            CC="$NDK_HOME/toolchains/llvm/prebuilt/$PREBUILT/bin/i686-linux-android${ANDROID_API}-clang${HOST_EXT}"
+            CLANG_PREFIX="i686-linux-android"
             ;;
     esac
 
-    if [ ! -x "$CC" ] && [ ! -f "$CC" ]; then
+    BIN_DIR="$NDK_HOME/toolchains/llvm/prebuilt/$PREBUILT/bin"
+    CC="$BIN_DIR/${CLANG_PREFIX}${ANDROID_API}-clang${HOST_EXT}"
+    CXX="$BIN_DIR/${CLANG_PREFIX}${ANDROID_API}-clang++${HOST_EXT}"
+    AR="$BIN_DIR/llvm-ar${HOST_EXT}"
+
+    if [ ! -f "$CC" ]; then
         echo "Error: Compiler not found at $CC" >&2
         exit 1
     fi
+    if [ ! -f "$AR" ]; then
+        echo "Error: Archiver not found at $AR" >&2
+        exit 1
+    fi
 
+    # CARGO_TARGET_<TRIPLE>_LINKER: tells cargo/rustc which linker to use.
+    # CC_<TRIPLE> / CXX_<TRIPLE> / AR_<TRIPLE>: tells the `cc` crate (used by
+    # build scripts like libsqlite3-sys) which C/C++ compiler and archiver to
+    # use. Without these, `cc` searches PATH for `<triple>-clang` which does
+    # not exist in the NDK (only the API-suffixed variant does).
     export "CARGO_TARGET_${target//-/_}_LINKER=$CC"
+    export "CC_${target//-/_}=$CC"
+    export "CXX_${target//-/_}=$CXX"
+    export "AR_${target//-/_}=$AR"
 
     echo "Building for $target ($abi)..."
     cargo build --target "$target" --release --manifest-path "$SCRIPT_DIR/Cargo.toml"

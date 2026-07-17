@@ -36,14 +36,28 @@ foreach ($Target in $Targets.Keys) {
     # Select the correct clang compiler
     $TargetClean = $Target -replace '-', '_' -replace '.', '_'
     switch ($Target) {
-        "aarch64-linux-android"    { $CC = "$Prebuilt\aarch64-linux-android$AndroidApi-clang.cmd" }
-        "armv7-linux-androideabi"  { $CC = "$Prebuilt\armv7a-linux-androideabi$AndroidApi-clang.cmd" }
-        "x86_64-linux-android"     { $CC = "$Prebuilt\x86_64-linux-android$AndroidApi-clang.cmd" }
-        "i686-linux-android"       { $CC = "$Prebuilt\i686-linux-android$AndroidApi-clang.cmd" }
+        "aarch64-linux-android"    { $ClangPrefix = "aarch64-linux-android" }
+        "armv7-linux-androideabi"  { $ClangPrefix = "armv7a-linux-androideabi" }
+        "x86_64-linux-android"     { $ClangPrefix = "x86_64-linux-android" }
+        "i686-linux-android"       { $ClangPrefix = "i686-linux-android" }
     }
 
-    $LinkerEnv = "CARGO_TARGET_${TargetClean}_LINKER"
-    [Environment]::SetEnvironmentVariable($LinkerEnv, $CC, "Process")
+    $CC   = "$Prebuilt\$ClangPrefix$AndroidApi-clang.cmd"
+    $CXX  = "$Prebuilt\$ClangPrefix$AndroidApi-clang++.cmd"
+    $AR   = "$Prebuilt\llvm-ar.cmd"
+
+    if (-not (Test-Path $CC))   { throw "Compiler not found at $CC" }
+    if (-not (Test-Path $AR))   { throw "Archiver not found at $AR" }
+
+    # CARGO_TARGET_<TRIPLE>_LINKER: tells cargo/rustc which linker to use.
+    # CC_<TRIPLE> / CXX_<TRIPLE> / AR_<TRIPLE>: tells the `cc` crate (used by
+    # build scripts like libsqlite3-sys) which C/C++ compiler and archiver to
+    # use. Without these, `cc` searches PATH for `<triple>-clang` which does
+    # not exist in the NDK (only the API-suffixed variant does).
+    [Environment]::SetEnvironmentVariable("CARGO_TARGET_${TargetClean}_LINKER", $CC,   "Process")
+    [Environment]::SetEnvironmentVariable("CC_${TargetClean}",                   $CC,   "Process")
+    [Environment]::SetEnvironmentVariable("CXX_${TargetClean}",                  $CXX,  "Process")
+    [Environment]::SetEnvironmentVariable("AR_${TargetClean}",                   $AR,   "Process")
 
     Write-Host "Building for $Target ($Abi)..." -ForegroundColor Cyan
     cargo build --target $Target --release --manifest-path "$ScriptDir\Cargo.toml"
