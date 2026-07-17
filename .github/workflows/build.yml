@@ -37,18 +37,11 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace 2>&1 | tee gradle.log
-
-      - name: Upload build log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log
-          path: gradle.log
+        run: ./gradlew assembleRelease
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: app/build/outputs/apk/release/app-release-*.apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
