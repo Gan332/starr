@@ -80,12 +80,18 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Decode keystore (optional)
-        if: ${{ secrets.KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
+          echo "$KEYSTORE_BASE64" | base64 --decode > release.keystore
 
       - name: Sign APK (optional)
-        if: ${{ secrets.KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
           BUILD_TOOLS=$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -n1)
@@ -94,7 +100,7 @@ jobs:
             echo "apksigner not found at $APKSIGNER" >&2
             exit 1
           fi
-          "$APKSIGNER" sign --ks release.keystore --ks-key-alias "${{ secrets.KEY_ALIAS }}" --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" --key-pass pass:"${{ secrets.KEY_PASSWORD }}" "$APK"
+          "$APKSIGNER" sign --ks release.keystore --ks-key-alias "$KEY_ALIAS" --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" "$APK"
 
       - name: Upload Release artifacts
         uses: actions/upload-artifact@v4
