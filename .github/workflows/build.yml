@@ -37,17 +37,18 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace 2>&1 | tee build-debug.log
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace 2>&1 | tee build-release.log
 
-      - name: Upload APKs
+      - name: Upload APKs and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apks
+          name: build-output
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
+            build-*.log
           if-no-files-found: ignore
