@@ -1,0 +1,234 @@
+package com.auth2fa.app.viewmodel
+
+import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.auth2fa.app.App
+import com.auth2fa.app.data.Account
+import com.auth2fa.app.totp.TOTPGenerator
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class CodeEntry(
+    val accountId: Long,
+    val code: String?,
+    val remainingSeconds: Int,
+    val progress: Float
+)
+
+data class AppUiState(
+    val accounts: List<Account> = emptyList(),
+    val codes: Map<Long, CodeEntry> = emptyMap(),
+    val searchQuery: String = "",
+    val isDarkTheme: Boolean = true,
+    val accountCount: Int = 0
+)
+
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val repository = (application as App).repository
+
+    private val _uiState = MutableStateFlow(AppUiState())
+    val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
+
+    private var tickJob: Job? = null
+    private var searchJob: Job? = null
+
+    // Track copied account ID for animation
+    private val _copiedAccountId = MutableStateFlow<Long?>(null)
+    val copiedAccountId: StateFlow<Long?> = _copiedAccountId.asStateFlow()
+
+    init {
+        // Load theme preference
+        val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val isDark = prefs.getBoolean("dark_theme", true)
+        _uiState.update { it.copy(isDarkTheme = isDark) }
+
+        // Observe accounts
+        viewModelScope.launch {
+            repository.allAccounts.collect { accounts ->
+                _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size) }
+                startTicking()
+            }
+        }
+    }
+
+    private fun startTicking() {
+        tickJob?.cancel()
+        tickJob = viewModelScope.launch {
+            while (true) {
+                generateAllCodes()
+                delay(1000L)
+            }
+        }
+    }
+
+    private suspend fun generateAllCodes() {
+        val accounts = _uiState.value.accounts
+        val codes = mutableMapOf<Long, CodeEntry>()
+
+        for (account in accounts) {
+            try {
+                val code = TOTPGenerator.generate(account.secret, account.digits, account.period)
+                val remaining = TOTPGenerator.getTimeRemaining(account.period)
+                val progress = TOTPGenerator.getProgress(account.period)
+                codes[account.id] = CodeEntry(account.id, code, remaining, progress)
+            } catch (e: Exception) {
+                codes[account.id] = CodeEntry(account.id, null, 0, 0f)
+            }
+        }
+
+        _uiState.update { it.copy(codes = codes) }
+    }
+
+    fun updateSearch(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            if (query.isBlank()) {
+                repository.allAccounts.collect { accounts ->
+                    _uiState.update { it.copy(accounts = accounts) }
+                }
+            } else {
+                repository.search(query).collect { accounts ->
+                    _uiState.update { it.copy(accounts = accounts) }
+                }
+            }
+        }
+    }
+
+    fun addAccount(issuer: String, name: String, secret: String) {
+        viewModelScope.launch {
+            repository.insert(
+                Account(
+                    issuer = issuer.trim(),
+                    name = name.trim(),
+                    secret = secret.uppercase().replace("[-\\s]".toRegex(), "")
+                )
+            )
+        }
+    }
+
+    fun deleteAccount(account: Account) {
+        viewModelScope.launch {
+            repository.delete(account)
+        }
+    }
+
+    fun copyCode(accountId: Long) {
+        val entry = _uiState.value.codes[accountId] ?: return
+        val code = entry.code ?: return
+
+        val clipboard = getApplication<App>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("2FA Code", code))
+
+        _copiedAccountId.value = accountId
+        viewModelScope.launch {
+            delay(1500)
+            _copiedAccountId.value = null
+        }
+    }
+
+    fun toggleTheme() {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val current = _uiState.value.isDarkTheme
+        prefs.edit().putBoolean("dark_theme", !current).apply()
+        _uiState.update { it.copy(isDarkTheme = !current) }
+    }
+
+    fun getExportJson(): String {
+        return try {
+            val jsonArr = JSONArray()
+            val scopeAccounts = kotlinx.coroutines.runBlocking {
+                repository.getAllList()
+            }
+            for (a in scopeAccounts) {
+                val obj = JSONObject()
+                obj.put("issuer", a.issuer)
+                obj.put("name", a.name)
+                obj.put("secret", a.secret)
+                obj.put("digits", a.digits)
+                obj.put("period", a.period)
+                jsonArr.put(obj)
+            }
+            jsonArr.toString(2)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    fun importFromJson(json: String): Int {
+        return try {
+            val jsonArr = JSONArray(json)
+            val accounts = mutableListOf<Account>()
+            for (i in 0 until jsonArr.length()) {
+                val obj = jsonArr.getJSONObject(i)
+                accounts.add(
+                    Account(
+                        issuer = obj.getString("issuer"),
+                        name = obj.optString("name", ""),
+                        secret = obj.getString("secret"),
+                        digits = obj.optInt("digits", 6),
+                        period = obj.optInt("period", 30)
+                    )
+                )
+            }
+            viewModelScope.launch {
+                repository.insertAll(accounts)
+            }
+            accounts.size
+        } catch (e: Exception) {
+            -1
+        }
+    }
+
+    /**
+     * Parse an otpauth:// URI and auto-add the account.
+     */
+    fun parseAndAddFromUri(uri: String): Boolean {
+        return try {
+            if (!uri.startsWith("otpauth://")) return false
+
+            val parsed = java.net.URI(uri)
+            if (parsed.host != "totp") return false
+
+            val query = parsed.query ?: ""
+            val params = query.split("&").associate {
+                val parts = it.split("=", limit = 2)
+                if (parts.size == 2) parts[0] to java.net.URLDecoder.decode(parts[1], "UTF-8")
+                else "" to ""
+            }
+
+            val secret = params["secret"] ?: return false
+            var issuer = params["issuer"] ?: ""
+            val path = parsed.path.removePrefix("/")
+
+            val colonIdx = path.indexOf(':')
+            var name = ""
+            if (colonIdx > 0) {
+                if (issuer.isEmpty()) issuer = path.substring(0, colonIdx)
+                name = path.substring(colonIdx + 1)
+            } else {
+                if (issuer.isEmpty()) issuer = path
+                else name = path
+            }
+
+            addAccount(issuer, name, secret)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        tickJob?.cancel()
+    }
+}

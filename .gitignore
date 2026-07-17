@@ -1,0 +1,13 @@
+*.exe
+*.exe/
+.idea/
+*.iml
+build/
+app/build/
+.gradle/
+local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+*.log
