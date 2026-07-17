@@ -20,9 +20,11 @@ import androidx.compose.ui.unit.dp
 fun SettingsSheet(
     isDarkTheme: Boolean,
     biometricEnabled: Boolean,
+    notificationEnabled: Boolean,
     accountCount: Int,
     onToggleTheme: () -> Unit,
     onToggleBiometric: (Boolean) -> Unit,
+    onToggleNotification: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onDismiss: () -> Unit
@@ -102,6 +104,23 @@ fun SettingsSheet(
                     )
                 },
                 onClick = { onToggleBiometric(!biometricEnabled) }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Notifications,
+                title = "通知栏显示验证码",
+                subtitle = "在通知栏快捷查看和复制验证码",
+                trailing = {
+                    Switch(
+                        checked = notificationEnabled,
+                        onCheckedChange = { onToggleNotification(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                },
+                onClick = { onToggleNotification(!notificationEnabled) }
             )
 
             Spacer(modifier = Modifier.height(20.dp))

@@ -4,10 +4,13 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.auth2fa.app.App
 import com.auth2fa.app.data.Account
+import com.auth2fa.app.notification.NotificationHelper
 import com.auth2fa.app.totp.TOTPGenerator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -25,13 +28,16 @@ data class CodeEntry(
     val progress: Float
 )
 
+enum class SortMode { NAME, RECENT, TYPE }
+
 data class AppUiState(
     val accounts: List<Account> = emptyList(),
     val codes: Map<Long, CodeEntry> = emptyMap(),
     val searchQuery: String = "",
     val isDarkTheme: Boolean = true,
     val accountCount: Int = 0,
-    val biometricEnabled: Boolean = false
+    val biometricEnabled: Boolean = false,
+    val notificationEnabled: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -56,7 +62,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
         val isDark = prefs.getBoolean("dark_theme", true)
         val biometricEnabled = prefs.getBoolean("biometric_lock", false)
-        _uiState.update { it.copy(isDarkTheme = isDark, biometricEnabled = biometricEnabled) }
+        val notificationEnabled = prefs.getBoolean("notification_enabled", false)
+        _uiState.update { it.copy(isDarkTheme = isDark, biometricEnabled = biometricEnabled, notificationEnabled = notificationEnabled) }
 
         // Observe accounts with debounced search
         searchCollectionJob = viewModelScope.launch {
@@ -102,6 +109,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         _uiState.update { it.copy(codes = codes) }
+
+        // Update notification if enabled
+        if (_uiState.value.notificationEnabled && accounts.isNotEmpty()) {
+            val context = getApplication<App>()
+            NotificationHelper.show(context, accounts)
+        }
     }
 
     fun updateSearch(query: String) {
@@ -161,6 +174,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("biometric_lock", enabled).apply()
         _uiState.update { it.copy(biometricEnabled = enabled) }
+    }
+
+    fun toggleNotification(enabled: Boolean) {
+        val context = getApplication<App>()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("notification_enabled", enabled).apply()
+        _uiState.update { it.copy(notificationEnabled = enabled) }
+        if (!enabled) {
+            NotificationHelper.cancel(context)
+        }
+    }
+
+    fun hasNotificationPermission(): Boolean {
+        val context = getApplication<App>()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true // Below Android 13, no runtime permission needed
+        }
     }
 
     fun getExportJson(onResult: (String) -> Unit) {
