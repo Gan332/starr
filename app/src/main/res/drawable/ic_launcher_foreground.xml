@@ -22,12 +22,12 @@
             android:strokeWidth="2"
             android:strokeColor="#FFFFFF" />
         <path
-            android:fillColor="none"
+            android:fillColor="#00000000"
             android:pathData="M28,32V29C28,26.79 29.79,25 32,25C34.21,25 36,26.79 36,29V32"
             android:strokeWidth="2"
             android:strokeColor="#FFFFFF" />
         <path
-            android:fillColor="none"
+            android:fillColor="#00000000"
             android:pathData="M28,32H36V38H28Z"
             android:strokeWidth="2"
             android:strokeColor="#FFFFFF" />
