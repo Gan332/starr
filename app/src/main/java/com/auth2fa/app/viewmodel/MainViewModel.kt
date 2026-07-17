@@ -80,7 +80,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     else repository.search(query)
                 }
                 .collect { accounts ->
-                    _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size) }
+                    val categories = withContext(Dispatchers.IO) {
+                        repository.getAllCategories()
+                    }
+                    _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size, allCategories = categories) }
                 }
         }
 
