@@ -21,6 +21,7 @@ data class Account(
     @ColumnInfo(name = "note") val note: String = "",
     @ColumnInfo(name = "custom_emoji") val customEmoji: String = "",
     @ColumnInfo(name = "custom_color") val customColor: Int = 0,
+    @ColumnInfo(name = "account_type") val accountType: String = "TOTP",
     @ColumnInfo(name = "tags") val tags: String = "",
     @ColumnInfo(name = "hotp_counter") val hotpCounter: Long = 0,
     @ColumnInfo(name = "is_trashed") val isTrashed: Boolean = false,

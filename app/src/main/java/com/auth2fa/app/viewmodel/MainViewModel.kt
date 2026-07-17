@@ -46,6 +46,7 @@ data class AppUiState(
     val autoLockEnabled: Boolean = false,
     val pinEnabled: Boolean = false,
     val selectedCategory: String = "",
+    val sortMode: SortMode = SortMode.NAME,
     val allCategories: List<String> = emptyList(),
     val showFavoritesOnly: Boolean = false,
     val categoryModels: List<Category> = emptyList(),
@@ -659,6 +660,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         digest.update(salt)
         val hash = digest.digest(pin.toByteArray())
         return Base64.getEncoder().encodeToString(hash)
+    }
+
+    // ---- Theme & Settings ----
+
+    fun cycleTheme() {
+        val current = _uiState.value.themeMode
+        val next = when (current) {
+            ThemeMode.LIGHT -> ThemeMode.DARK
+            ThemeMode.DARK -> ThemeMode.SYSTEM
+            ThemeMode.SYSTEM -> ThemeMode.LIGHT
+        }
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putInt("theme_mode", next.ordinal).apply()
+        _uiState.update { it.copy(themeMode = next) }
+    }
+
+    fun toggleBiometric(enabled: Boolean) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("biometric_lock", enabled).apply()
+        _uiState.update { it.copy(biometricEnabled = enabled) }
+    }
+
+    fun toggleAutoLock(enabled: Boolean) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("auto_lock", enabled).apply()
+        _uiState.update { it.copy(autoLockEnabled = enabled) }
+    }
+
+    fun toggleMaterialYou() {
+        val current = _uiState.value.isMaterialYou
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("material_you", !current).apply()
+        _uiState.update { it.copy(isMaterialYou = !current) }
     }
 
     // ---- Time Correction ----
