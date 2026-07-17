@@ -77,6 +77,14 @@ interface AccountDao {
     @Query("SELECT DISTINCT category FROM accounts WHERE is_trashed = 0 AND category != '' ORDER BY category ASC")
     suspend fun getAllCategories(): List<String>
 
+    @Query("SELECT category, COUNT(*) as cnt FROM accounts WHERE is_trashed = 0 AND category != '' GROUP BY category")
+    suspend fun getCategoryCounts(): List<CategoryCount>
+
+data class CategoryCount(
+    val category: String,
+    val cnt: Int
+)
+
     @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND id = :id")
     suspend fun getById(id: Long): Account?
 
@@ -232,6 +240,8 @@ class AccountRepository(
     suspend fun deleteCategoryById(id: Long) = categoryDao.deleteById(id)
     suspend fun getCategoryByName(name: String): Category? = categoryDao.getByName(name)
     suspend fun getAllCategoriesList(): List<Category> = categoryDao.getAllList()
+
+    suspend fun getCategoryCounts(): List<CategoryCount> = dao.getCategoryCounts()
 
     companion object {
         @Volatile

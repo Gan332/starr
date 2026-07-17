@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -17,7 +18,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
 import com.auth2fa.app.data.Account
+import java.net.URLEncoder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +40,18 @@ fun EditAccountSheet(
     var tags by remember { mutableStateOf(account.tags) }
 
     val isFormValid = issuer.isNotBlank()
+    val context = LocalContext.current
+
+    fun buildOtpAuthUri(): String {
+        val encodedIssuer = URLEncoder.encode(issuer.trim(), "UTF-8")
+        val encodedName = if (name.isNotBlank()) URLEncoder.encode(name.trim(), "UTF-8") else ""
+        val label = if (encodedName.isNotEmpty()) "$encodedIssuer:$encodedName" else encodedIssuer
+        val sb = StringBuilder("otpauth://totp/$label?secret=${account.secret}")
+        sb.append("&issuer=$encodedIssuer")
+        if (account.digits != 6) sb.append("&digits=${account.digits}")
+        if (account.period != 30) sb.append("&period=${account.period}")
+        return sb.toString()
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -174,38 +189,57 @@ fun EditAccountSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Save button
-            Button(
-                onClick = {
-                    if (isFormValid) {
-                        onSave(
-                            account.copy(
-                                issuer = issuer.trim(),
-                                name = name.trim(),
-                                customEmoji = customEmoji.trim(),
-                                customColor = customColor,
-                                category = category.trim(),
-                                note = note.trim(),
-                                tags = tags.trim(),
-                            )
-                        )
-                        onDismiss()
-                    }
-                },
-                enabled = isFormValid,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape = MaterialTheme.shapes.medium,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+            // Share and Save buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    "保存更改",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp
-                )
+                OutlinedButton(
+                    onClick = {
+                        val uri = buildOtpAuthUri()
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, uri)
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "分享账户"))
+                    },
+                    modifier = Modifier.weight(1f).height(54.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("分享", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                }
+
+                Button(
+                    onClick = {
+                        if (isFormValid) {
+                            onSave(
+                                account.copy(
+                                    issuer = issuer.trim(),
+                                    name = name.trim(),
+                                    customEmoji = customEmoji.trim(),
+                                    customColor = customColor,
+                                    category = category.trim(),
+                                    note = note.trim(),
+                                    tags = tags.trim(),
+                                )
+                            )
+                            onDismiss()
+                        }
+                    },
+                    enabled = isFormValid,
+                    modifier = Modifier.weight(1f).height(54.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("保存更改", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

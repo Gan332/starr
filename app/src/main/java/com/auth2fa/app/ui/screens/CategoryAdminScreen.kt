@@ -53,6 +53,7 @@ private fun Color.toHex(): String = String.format(
 @Composable
 fun CategoryAdminScreen(
     categories: List<Category>,
+    categoryCounts: Map<String, Int> = emptyMap(),
     onAdd: (String, String, Int) -> Unit,
     onDelete: (Category) -> Unit,
     onSelect: (String) -> Unit,
@@ -110,6 +111,7 @@ fun CategoryAdminScreen(
                 items(categories, key = { it.id }) { category ->
                     CategoryItem(
                         category = category,
+                        count = categoryCounts[category.name] ?: 0,
                         onClick = { onSelect(category.name) },
                         onDelete = { categoryToDelete = category }
                     )
@@ -151,6 +153,7 @@ fun CategoryAdminScreen(
 @Composable
 private fun CategoryItem(
     category: Category,
+    count: Int = 0,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -195,6 +198,14 @@ private fun CategoryItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
+            Text(
+                text = "$count 个账户",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             IconButton(onClick = { showDeleteConfirm = true }) {
                 Icon(

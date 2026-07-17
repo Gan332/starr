@@ -45,6 +45,8 @@ data class AppUiState(
     val biometricEnabled: Boolean = false,
     val pinEnabled: Boolean = false,
     val notificationEnabled: Boolean = false,
+    val antiScreenshotEnabled: Boolean = true,
+    val autoLockTimeout: Int = 0, // 0=disabled, 15, 30, 60, 300 seconds
     val sortMode: SortMode = SortMode.NAME,
     val showFavoritesOnly: Boolean = false,
     val selectedCategory: String = "",
@@ -52,7 +54,8 @@ data class AppUiState(
     val isSelectMode: Boolean = false,
     val selectedIds: Set<Long> = emptySet(),
     val trashedAccounts: List<Account> = emptyList(),
-    val allCategoryModels: List<Category> = emptyList()
+    val allCategoryModels: List<Category> = emptyList(),
+    val categoryCounts: Map<String, Int> = emptyMap()
 ) {
     val isDarkTheme: Boolean
         get() = when (themeMode) {
@@ -88,7 +91,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val biometricEnabled = prefs.getBoolean("biometric_lock", false)
         val pinEnabled = prefs.getBoolean("pin_enabled", false)
         val notificationEnabled = prefs.getBoolean("notification_enabled", false)
-        _uiState.update { it.copy(themeMode = themeMode, useMaterialYou = useMaterialYou, biometricEnabled = biometricEnabled, pinEnabled = pinEnabled, notificationEnabled = notificationEnabled) }
+        val antiScreenshotEnabled = prefs.getBoolean("anti_screenshot", true)
+        val autoLockTimeout = prefs.getInt("auto_lock_timeout", 0)
+        _uiState.update { it.copy(themeMode = themeMode, useMaterialYou = useMaterialYou, biometricEnabled = biometricEnabled, pinEnabled = pinEnabled, notificationEnabled = notificationEnabled, antiScreenshotEnabled = antiScreenshotEnabled, autoLockTimeout = autoLockTimeout) }
 
         // Observe accounts with debounced search
         searchCollectionJob = viewModelScope.launch {
@@ -105,7 +110,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val categoryModels = withContext(Dispatchers.IO) {
                         repository.getAllCategoriesList()
                     }
-                    _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size, allCategories = categories, allCategoryModels = categoryModels) }
+                    val categoryCounts = withContext(Dispatchers.IO) {
+                        repository.getCategoryCounts().associate { it.category to it.cnt }
+                    }
+                    _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size, allCategories = categories, allCategoryModels = categoryModels, categoryCounts = categoryCounts) }
                 }
         }
 
@@ -329,6 +337,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleAntiScreenshot(enabled: Boolean) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("anti_screenshot", enabled).apply()
+        _uiState.update { it.copy(antiScreenshotEnabled = enabled) }
+    }
+
+    fun setAutoLockTimeout(seconds: Int) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putInt("auto_lock_timeout", seconds).apply()
+        _uiState.update { it.copy(autoLockTimeout = seconds) }
+    }
+
     // --- PIN lock methods ---
 
     /**
@@ -515,6 +535,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun importFromJson(json: String, onResult: (Int) -> Unit) {
         viewModelScope.launch {
             val count = try {
+                // Try Google Authenticator URI format first (one otpauth:// per line)
+                val lines = json.lines().map { it.trim() }.filter { it.startsWith("otpauth://") }
+                if (lines.isNotEmpty()) {
+                    val accounts = mutableListOf<Account>()
+                    for (line in lines) {
+                        val parsed = java.net.URI(line)
+                        if (parsed.host != "totp" && parsed.host != "hotp") continue
+                        val query = parsed.query ?: ""
+                        val params = query.split("&").associate {
+                            val parts = it.split("=", limit = 2)
+                            if (parts.size == 2) parts[0] to java.net.URLDecoder.decode(parts[1], "UTF-8")
+                            else "" to ""
+                        }
+                        val secret = params["secret"] ?: continue
+                        val issuerParam = params["issuer"] ?: ""
+                        val path = parsed.path.removePrefix("/")
+                        val (issuer, name) = when {
+                            path.isEmpty() -> issuerParam to ""
+                            path.contains(':') -> {
+                                val parts = path.split(':', limit = 2)
+                                (issuerParam.ifEmpty { parts[0] }) to parts[1]
+                            }
+                            else -> issuerParam to path
+                        }
+                        if (issuer.isBlank()) continue
+                        val digits = params["digits"]?.toIntOrNull() ?: 6
+                        val period = params["period"]?.toIntOrNull() ?: 30
+                        val accountType = if (parsed.host == "hotp") "HOTP" else "TOTP"
+                        accounts.add(
+                            Account(
+                                issuer = issuer,
+                                name = name,
+                                secret = secret.uppercase().replace("[^A-Z2-7]".toRegex(), ""),
+                                digits = digits,
+                                period = period,
+                                accountType = accountType
+                            )
+                        )
+                    }
+                    if (accounts.isNotEmpty()) {
+                        repository.insertAll(accounts)
+                        return@launch accounts.size
+                    }
+                }
+
+                // Fall back to JSON format
                 val jsonArr = JSONArray(json)
                 val accounts = mutableListOf<Account>()
                 for (i in 0 until jsonArr.length()) {

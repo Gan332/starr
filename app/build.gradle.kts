@@ -1,8 +1,20 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
 }
+
+// Release signing config.
+// Reads credentials from environment variables (CI) or local.properties (local dev):
+//   KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+// If any are missing, the release build falls back to unsigned APK.
+val keystoreFile = System.getenv("KEYSTORE_FILE")
+val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+val keyAlias = System.getenv("KEY_ALIAS")
+val keyPassword = System.getenv("KEY_PASSWORD")
+val hasSigningConfig = keystoreFile != null && File(keystoreFile).exists()
 
 android {
     namespace = "com.auth2fa.app"
@@ -16,10 +28,24 @@ android {
         versionName = "1.0.0"
     }
 
+    signingConfigs {
+        if (hasSigningConfig) {
+            create("release") {
+                storeFile = File(keystoreFile!!)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -58,11 +84,26 @@ android {
 // Or:  ./gradlew :app:assembleDebug (will build Rust first)
 tasks.register<Exec>("buildRust") {
     workingDir = file("${rootProject.projectDir}/rust")
-    val ndkHome = System.getenv("NDK_HOME") ?: System.getenv("ANDROID_HOME")?.let { "$it/ndk/26.1.10909125" }
+    val ndkHome = System.getenv("NDK_HOME") ?: System.getenv("ANDROID_HOME")?.let { androidHome ->
+        // Scan $ANDROID_HOME/ndk/ and pick the highest installed version.
+        val ndkRoot = File("$androidHome/ndk")
+        if (ndkRoot.exists() && ndkRoot.isDirectory) {
+            ndkRoot.listFiles()
+                ?.filter { it.isDirectory }
+                ?.maxByOrNull { it.name }
+                ?.path
+        } else null
+    }
     if (ndkHome != null) {
         environment("NDK_HOME", ndkHome)
     }
-    commandLine("powershell", "-ExecutionPolicy", "Bypass", "-File", "build-android.ps1")
+    val osName = System.getProperty("os.name").lowercase()
+    val isWindows = osName.contains("windows")
+    if (isWindows) {
+        commandLine("powershell", "-ExecutionPolicy", "Bypass", "-File", "build-android.ps1")
+    } else {
+        commandLine("bash", "build-android.sh")
+    }
 }
 
 tasks.named("preBuild") {

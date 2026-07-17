@@ -3,6 +3,9 @@ package com.auth2fa.app
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -33,6 +36,15 @@ class MainActivity : ComponentActivity() {
     private var pendingExportJson: String = ""
     private var isLocked = false
     private var isPinLocked = false
+    private val autoLockHandler = Handler(Looper.getMainLooper())
+    private val autoLockRunnable = Runnable {
+        if (viewModel.uiState.value.biometricEnabled) {
+            isLocked = true
+        }
+        if (viewModel.uiState.value.pinEnabled) {
+            isPinLocked = true
+        }
+    }
 
     private val importLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -97,6 +109,9 @@ class MainActivity : ComponentActivity() {
         if (prefs.getBoolean("pin_enabled", false)) {
             isPinLocked = true
         }
+
+        // Apply anti-screenshot if enabled
+        applyAntiScreenshot(prefs.getBoolean("anti_screenshot", true))
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -193,6 +208,8 @@ class MainActivity : ComponentActivity() {
                     biometricEnabled = uiState.biometricEnabled,
                     pinEnabled = uiState.pinEnabled,
                     notificationEnabled = uiState.notificationEnabled,
+                    antiScreenshotEnabled = uiState.antiScreenshotEnabled,
+                    autoLockTimeout = uiState.autoLockTimeout,
                     accountCount = uiState.accountCount,
                     onSetThemeMode = { viewModel.setThemeMode(it) },
                     onToggleMaterialYou = { viewModel.toggleMaterialYou(it) },
@@ -207,6 +224,8 @@ class MainActivity : ComponentActivity() {
                             viewModel.toggleNotification(it)
                         }
                     },
+                    onToggleAntiScreenshot = { applyAntiScreenshot(it); viewModel.toggleAntiScreenshot(it) },
+                    onSetAutoLockTimeout = { viewModel.setAutoLockTimeout(it) },
                     onExport = {
                         viewModel.getExportJson { json ->
                             val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -247,6 +266,7 @@ class MainActivity : ComponentActivity() {
             if (showCategoryAdmin) {
                 CategoryAdminScreen(
                     categories = uiState.allCategoryModels,
+                    categoryCounts = uiState.categoryCounts,
                     onAdd = { name, emoji, color -> viewModel.addCategory(name, emoji, color) },
                     onDelete = { viewModel.deleteCategory(it) },
                     onSelect = { },
@@ -258,16 +278,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (!isLocked && !isPinLocked && viewModel.uiState.value.biometricEnabled) {
-            isLocked = true
-        }
-        if (!isLocked && !isPinLocked && viewModel.uiState.value.pinEnabled) {
-            isPinLocked = true
+        val timeout = viewModel.uiState.value.autoLockTimeout
+        if (timeout > 0) {
+            autoLockHandler.postDelayed(autoLockRunnable, timeout * 1000L)
+        } else {
+            // If no auto-lock timeout, lock immediately as before
+            if (!isLocked && !isPinLocked && viewModel.uiState.value.biometricEnabled) {
+                isLocked = true
+            }
+            if (!isLocked && !isPinLocked && viewModel.uiState.value.pinEnabled) {
+                isPinLocked = true
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
+        autoLockHandler.removeCallbacks(autoLockRunnable)
         if (isLocked && viewModel.uiState.value.biometricEnabled) {
             biometricHelper.authenticate(
                 onSuccess = { isLocked = false },
@@ -276,5 +303,16 @@ class MainActivity : ComponentActivity() {
         }
         // PIN lock stays active until user enters correct PIN
         // isPinLocked remains true and PinEntryScreen handles it
+    }
+
+    private fun applyAntiScreenshot(enabled: Boolean) {
+        if (enabled) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 }

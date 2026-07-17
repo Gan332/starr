@@ -31,6 +31,16 @@ class TOTPWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        super.onDeleted(context, appWidgetIds)
+        val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        for (appWidgetId in appWidgetIds) {
+            editor.remove("widget_${appWidgetId}_accounts")
+        }
+        editor.apply()
+    }
+
     companion object {
         internal fun updateAppWidget(
             context: Context,
@@ -50,15 +60,26 @@ class TOTPWidgetProvider : AppWidgetProvider() {
             // Build the code list
             try {
                 val repository = AccountRepository.getInstance(context)
-                val accounts = runBlocking { repository.getAllList() }
+                val allAccounts = runBlocking { repository.getAllList() }
                 val now = System.currentTimeMillis() / 1000
 
-                if (accounts.isNotEmpty()) {
-                    // Take first 5 accounts for widget display
-                    val displayAccounts = accounts.take(5)
+                // Load selected accounts for this widget
+                val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+                val selectedIds = prefs.getStringSet("widget_${appWidgetId}_accounts", null)?.mapNotNull {
+                    it.toLongOrNull()
+                }?.toSet()
+
+                // Filter accounts based on selection, or show first 5 if no selection
+                val filteredAccounts = if (selectedIds != null && selectedIds.isNotEmpty()) {
+                    allAccounts.filter { it.id in selectedIds }.take(5)
+                } else {
+                    allAccounts.take(5)
+                }
+
+                if (filteredAccounts.isNotEmpty()) {
                     val codeText = StringBuilder()
 
-                    for ((index, account) in displayAccounts.withIndex()) {
+                    for ((index, account) in filteredAccounts.withIndex()) {
                         val code = try {
                             when (account.accountType) {
                                 "STEAM" -> SteamTOTPGenerator.generate(account.secret, now)
@@ -69,13 +90,13 @@ class TOTPWidgetProvider : AppWidgetProvider() {
                             "ERR"
                         }
                         codeText.append("${account.issuer}: $code")
-                        if (index < displayAccounts.lastIndex) {
+                        if (index < filteredAccounts.lastIndex) {
                             codeText.append("\n")
                         }
                     }
 
-                    if (accounts.size > 5) {
-                        codeText.append("\n+${accounts.size - 5} more...")
+                    if (allAccounts.size > filteredAccounts.size) {
+                        codeText.append("\n+${allAccounts.size - filteredAccounts.size} more...")
                     }
 
                     views.setTextViewText(R.id.widget_code_list_text, codeText.toString())

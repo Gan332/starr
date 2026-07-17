@@ -6,4 +6,5 @@
     android:initialLayout="@layout/totp_widget_layout"
     android:resizeMode="vertical|horizontal"
     android:widgetCategory="home_screen"
+    android:configure="com.auth2fa.app.widget.WidgetConfigureActivity"
     android:description="@string/widget_description" />

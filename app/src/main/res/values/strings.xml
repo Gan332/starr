@@ -3,4 +3,8 @@
     <string name="app_name">Authenticator</string>
     <string name="widget_name">TOTP 验证码</string>
     <string name="widget_description">快速查看 TOTP 验证码</string>
+    <string name="shortcut_add">添加账户</string>
+    <string name="shortcut_add_long">快速添加双重验证账户</string>
+    <string name="shortcut_scan">扫描二维码</string>
+    <string name="shortcut_scan_long">扫描二维码添加账户</string>
 </resources>

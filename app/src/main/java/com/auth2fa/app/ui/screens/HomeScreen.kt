@@ -1,9 +1,11 @@
 package com.auth2fa.app.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -223,19 +225,46 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(uiState.accounts, key = { it.id }) { account ->
-                        AccountCard(
-                            account = account,
-                            codeEntry = uiState.codes[account.id],
-                            isCopied = copiedAccountId == account.id,
-                            isSelected = account.id in uiState.selectedIds,
-                            isSelectMode = uiState.isSelectMode,
-                            onCopy = { onCopyCode(account.id) },
-                            onDelete = { deleteConfirmAccount = account },
-                            onEdit = { editTargetAccount = account },
-                            onToggleFavorite = { onToggleFavorite(account.id) },
-                            onToggleSelect = { onToggleSelectId(account.id) },
-                            onIncrementHotp = { onIncrementHotp(account.id) }
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { value ->
+                                if (value == SwipeToDismissBoxValue.EndToStart) {
+                                    deleteConfirmAccount = account
+                                    true
+                                } else false
+                            }
                         )
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            backgroundContent = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                        .background(MaterialTheme.colorScheme.error, RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 20.dp),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "删除",
+                                        tint = MaterialTheme.colorScheme.onError)
+                                }
+                            },
+                            enableDismissFromStartToEnd = false,
+                            enableDismissFromEndToStart = true
+                        ) {
+                            AccountCard(
+                                account = account,
+                                codeEntry = uiState.codes[account.id],
+                                isCopied = copiedAccountId == account.id,
+                                isSelected = account.id in uiState.selectedIds,
+                                isSelectMode = uiState.isSelectMode,
+                                onCopy = { onCopyCode(account.id) },
+                                onDelete = { deleteConfirmAccount = account },
+                                onEdit = { editTargetAccount = account },
+                                onToggleFavorite = { onToggleFavorite(account.id) },
+                                onToggleSelect = { onToggleSelectId(account.id) },
+                                onIncrementHotp = { onIncrementHotp(account.id) }
+                            )
+                        }
                     }
                 }
             }

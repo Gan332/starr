@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
@@ -18,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +50,7 @@ fun AccountCard(
     val accentColor = if (account.customColor != 0) Color(account.customColor)
         else getAccentColor(account.issuer)
     val emoji = account.customEmoji.ifEmpty { getIssuerEmoji(account.issuer) }
+    val haptic = LocalHapticFeedback.current
 
     val bgColor by animateColorAsState(
         targetValue = if (isCopied) accentColor.copy(alpha = 0.15f)
@@ -65,7 +69,7 @@ fun AccountCard(
                 if (isSelectMode) Modifier.combinedClickable(
                     onClick = onToggleSelect,
                     onLongClick = onToggleSelect
-                ) else Modifier.clickable { onCopy() }
+                ) else Modifier.clickable { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onCopy() }
             ),
         shape = RoundedCornerShape(RoundedLg),
         containerColor = bgColor,
@@ -175,18 +179,21 @@ fun AccountCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.End
                         ) {
-                            Box(modifier = Modifier.width(40.dp).height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)) {
-                                Box(modifier = Modifier.fillMaxHeight()
-                                    .fillMaxWidth(fraction = 1f - codeEntry.progress)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(progressColor))
+                            Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    progress = { 1f - codeEntry.progress },
+                                    modifier = Modifier.fillMaxSize(),
+                                    strokeWidth = 2.5.dp,
+                                    color = progressColor,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                Text(
+                                    "${codeEntry.remainingSeconds}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = progressColor,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("${codeEntry.remainingSeconds}s",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = progressColor, fontWeight = FontWeight.Medium)
                         }
                     }
                 }

@@ -25,6 +25,8 @@ fun SettingsSheet(
     biometricEnabled: Boolean,
     pinEnabled: Boolean,
     notificationEnabled: Boolean,
+    antiScreenshotEnabled: Boolean,
+    autoLockTimeout: Int,
     accountCount: Int,
     onSetThemeMode: (ThemeMode) -> Unit,
     onToggleMaterialYou: (Boolean) -> Unit,
@@ -33,6 +35,8 @@ fun SettingsSheet(
     onSetPin: (String) -> Unit,
     onRemovePin: () -> Unit,
     onToggleNotification: (Boolean) -> Unit,
+    onToggleAntiScreenshot: (Boolean) -> Unit,
+    onSetAutoLockTimeout: (Int) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onTrashClick: () -> Unit,
@@ -201,6 +205,45 @@ fun SettingsSheet(
                     )
                 },
                 onClick = { onToggleNotification(!notificationEnabled) }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Block,
+                title = "防截屏",
+                subtitle = "禁止应用内截图和屏幕录制",
+                trailing = {
+                    Switch(
+                        checked = antiScreenshotEnabled,
+                        onCheckedChange = { onToggleAntiScreenshot(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                },
+                onClick = { onToggleAntiScreenshot(!antiScreenshotEnabled) }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Timer,
+                title = "自动锁定",
+                subtitle = if (autoLockTimeout == 0) "关闭" else "离开 ${autoLockTimeout} 秒后自动锁定",
+                trailing = {
+                    var showAutoLock by remember { mutableStateOf(false) }
+                    TextButton(onClick = { showAutoLock = true }) {
+                        Text(
+                            if (autoLockTimeout == 0) "关闭" else "${autoLockTimeout}s",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    DropdownMenu(expanded = showAutoLock, onDismissRequest = { showAutoLock = false }) {
+                        DropdownMenuItem(text = { Text("关闭") }, onClick = { onSetAutoLockTimeout(0); showAutoLock = false })
+                        DropdownMenuItem(text = { Text("15 秒") }, onClick = { onSetAutoLockTimeout(15); showAutoLock = false })
+                        DropdownMenuItem(text = { Text("30 秒") }, onClick = { onSetAutoLockTimeout(30); showAutoLock = false })
+                        DropdownMenuItem(text = { Text("1 分钟") }, onClick = { onSetAutoLockTimeout(60); showAutoLock = false })
+                        DropdownMenuItem(text = { Text("5 分钟") }, onClick = { onSetAutoLockTimeout(300); showAutoLock = false })
+                    }
+                }
             )
 
             Spacer(modifier = Modifier.height(20.dp))
