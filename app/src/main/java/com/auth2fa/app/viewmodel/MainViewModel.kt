@@ -37,7 +37,13 @@ data class AppUiState(
     val isDarkTheme: Boolean = true,
     val accountCount: Int = 0,
     val biometricEnabled: Boolean = false,
-    val notificationEnabled: Boolean = false
+    val notificationEnabled: Boolean = false,
+    val sortMode: SortMode = SortMode.NAME,
+    val showFavoritesOnly: Boolean = false,
+    val selectedCategory: String = "",
+    val allCategories: List<String> = emptyList(),
+    val isSelectMode: Boolean = false,
+    val selectedIds: Set<Long> = emptySet()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -194,6 +200,105 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
             true // Below Android 13, no runtime permission needed
+        }
+    }
+
+    // --- HomeScreen callback methods ---
+
+    fun deleteAccount(account: Account) {
+        viewModelScope.launch {
+            repository.delete(account)
+        }
+    }
+
+    fun toggleFavorite(accountId: Long) {
+        viewModelScope.launch {
+            val account = withContext(Dispatchers.IO) { repository.getById(accountId) } ?: return@launch
+            repository.update(account.copy(isFavorite = !account.isFavorite))
+        }
+    }
+
+    fun setSortMode(mode: SortMode) {
+        _uiState.update { it.copy(sortMode = mode) }
+    }
+
+    fun setSelectedCategory(category: String) {
+        _uiState.update { it.copy(selectedCategory = category) }
+    }
+
+    fun toggleFavoritesOnly() {
+        _uiState.update { it.copy(showFavoritesOnly = !it.showFavoritesOnly) }
+    }
+
+    fun toggleSelectMode() {
+        _uiState.update {
+            it.copy(
+                isSelectMode = !it.isSelectMode,
+                selectedIds = if (it.isSelectMode) emptySet() else it.selectedIds
+            )
+        }
+    }
+
+    fun toggleSelectId(id: Long) {
+        _uiState.update {
+            val newIds = if (id in it.selectedIds) it.selectedIds - id else it.selectedIds + id
+            it.copy(selectedIds = newIds)
+        }
+    }
+
+    fun selectAll() {
+        _uiState.update {
+            it.copy(selectedIds = it.accounts.map { a -> a.id }.toSet())
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedIds = emptySet(), isSelectMode = false) }
+    }
+
+    fun trashSelectedAccounts() {
+        viewModelScope.launch {
+            val ids = _uiState.value.selectedIds
+            for (id in ids) {
+                withContext(Dispatchers.IO) { repository.deleteById(id) }
+            }
+            _uiState.update { it.copy(selectedIds = emptySet(), isSelectMode = false) }
+        }
+    }
+
+    fun exportSelectedAccounts(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val json = try {
+                val jsonArr = JSONArray()
+                val ids = _uiState.value.selectedIds
+                val scopeAccounts = withContext(Dispatchers.IO) { repository.getAllList() }
+                for (a in scopeAccounts.filter { it.id in ids }) {
+                    val obj = JSONObject()
+                    obj.put("issuer", a.issuer)
+                    obj.put("name", a.name)
+                    obj.put("secret", a.secret)
+                    obj.put("digits", a.digits)
+                    obj.put("period", a.period)
+                    jsonArr.put(obj)
+                }
+                jsonArr.toString(2)
+            } catch (e: Exception) { "[]" }
+            onResult(json)
+        }
+    }
+
+    fun incrementHotpCounter(accountId: Long) {
+        // HOTP not implemented yet - placeholder
+    }
+
+    fun setBatchCategory(category: String) {
+        viewModelScope.launch {
+            val ids = _uiState.value.selectedIds
+            for (id in ids) {
+                val account = withContext(Dispatchers.IO) { repository.getById(id) } ?: continue
+                withContext(Dispatchers.IO) { repository.update(account.copy(category = category)) }
+            }
+            _uiState.update { it.copy(selectedIds = emptySet(), isSelectMode = false) }
         }
     }
 

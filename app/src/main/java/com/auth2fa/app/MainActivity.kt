@@ -116,18 +116,28 @@ class MainActivity : ComponentActivity() {
                             onEditAccount = { },
                             onAddClick = { showAddSheet = true },
                             onSettingsClick = { showSettingsSheet = true },
-                            onToggleFavorite = { },
-                            onSetSortMode = { },
-                            onSelectCategory = { },
-                            onToggleFavoritesFilter = { },
-                            onToggleSelectMode = { },
-                            onToggleSelectId = { },
-                            onSelectAll = { },
-                            onClearSelection = { },
-                            onDeleteSelected = { },
-                            onExportSelected = { },
-                            onIncrementHotp = { },
-                            onBatchChangeCategory = { }
+                            onToggleFavorite = { viewModel.toggleFavorite(it) },
+                            onSetSortMode = { viewModel.setSortMode(it) },
+                            onSelectCategory = { viewModel.setSelectedCategory(it) },
+                            onToggleFavoritesFilter = { viewModel.toggleFavoritesOnly() },
+                            onToggleSelectMode = { viewModel.toggleSelectMode() },
+                            onToggleSelectId = { viewModel.toggleSelectId(it) },
+                            onSelectAll = { viewModel.selectAll() },
+                            onClearSelection = { viewModel.clearSelection() },
+                            onDeleteSelected = { viewModel.trashSelectedAccounts() },
+                            onExportSelected = {
+                                viewModel.exportSelectedAccounts { json ->
+                                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                        type = "application/json"
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                        putExtra(Intent.EXTRA_TITLE, "2fa-export-selected.json")
+                                    }
+                                    pendingExportJson = json
+                                    exportLauncher.launch(intent)
+                                }
+                            },
+                            onIncrementHotp = { viewModel.incrementHotpCounter(it) },
+                            onBatchChangeCategory = { viewModel.setBatchCategory(it) }
                         )
                     }
                 }
