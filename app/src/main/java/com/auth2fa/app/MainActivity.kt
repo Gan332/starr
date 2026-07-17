@@ -16,8 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.auth2fa.app.biometric.BiometricHelper
 import com.auth2fa.app.ui.screens.AddAccountSheet
+import com.auth2fa.app.ui.screens.CategoryAdminScreen
 import com.auth2fa.app.ui.screens.HomeScreen
 import com.auth2fa.app.ui.screens.SettingsSheet
+import com.auth2fa.app.ui.screens.TrashScreen
 import com.auth2fa.app.ui.theme.Auth2FATheme
 import com.auth2fa.app.viewmodel.MainViewModel
 import com.auth2fa.app.viewmodel.ThemeMode
@@ -96,6 +98,8 @@ class MainActivity : ComponentActivity() {
             val copiedId by viewModel.copiedAccountId.collectAsState()
             var showAddSheet by remember { mutableStateOf(false) }
             var showSettingsSheet by remember { mutableStateOf(false) }
+            var showTrashScreen by remember { mutableStateOf(false) }
+            var showCategoryAdmin by remember { mutableStateOf(false) }
 
             Auth2FATheme(
                 themeMode = if (uiState.isDarkTheme) ThemeMode.DARK else ThemeMode.LIGHT
@@ -112,8 +116,8 @@ class MainActivity : ComponentActivity() {
                             copiedAccountId = copiedId,
                             onSearch = { viewModel.updateSearch(it) },
                             onCopyCode = { viewModel.copyCode(it) },
-                            onDeleteAccount = { viewModel.deleteAccount(it) },
-                            onEditAccount = { },
+                            onDeleteAccount = { viewModel.trashAccount(it) },
+                            onEditAccount = { viewModel.updateAccount(it) },
                             onAddClick = { showAddSheet = true },
                             onSettingsClick = { showSettingsSheet = true },
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
@@ -158,6 +162,8 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            // Edit account sheet is handled inside HomeScreen
+
             if (showSettingsSheet) {
                 SettingsSheet(
                     isDarkTheme = uiState.isDarkTheme,
@@ -185,7 +191,38 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onImport = { importLauncher.launch("application/json") },
+                    onTrashClick = {
+                        showSettingsSheet = false
+                        viewModel.refreshTrashedAccounts()
+                        showTrashScreen = true
+                    },
+                    onCategoryAdminClick = {
+                        showSettingsSheet = false
+                        showCategoryAdmin = true
+                    },
                     onDismiss = { showSettingsSheet = false }
+                )
+            }
+
+            // Trash screen
+            if (showTrashScreen) {
+                TrashScreen(
+                    trashedAccounts = uiState.trashedAccounts,
+                    onRestore = { viewModel.restoreAccount(it) },
+                    onPermanentDelete = { viewModel.permanentlyDelete(it) },
+                    onClearTrash = { viewModel.clearTrash() },
+                    onDismiss = { showTrashScreen = false }
+                )
+            }
+
+            // Category admin screen
+            if (showCategoryAdmin) {
+                CategoryAdminScreen(
+                    categories = uiState.allCategoryModels,
+                    onAdd = { name, emoji, color -> viewModel.addCategory(name, emoji, color) },
+                    onDelete = { viewModel.deleteCategory(it) },
+                    onSelect = { },
+                    onDismiss = { showCategoryAdmin = false }
                 )
             }
         }

@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.auth2fa.app.App
 import com.auth2fa.app.data.Account
+import com.auth2fa.app.data.Category
 import com.auth2fa.app.notification.NotificationHelper
 import com.auth2fa.app.totp.TOTPGenerator
 import kotlinx.coroutines.Job
@@ -43,7 +44,9 @@ data class AppUiState(
     val selectedCategory: String = "",
     val allCategories: List<String> = emptyList(),
     val isSelectMode: Boolean = false,
-    val selectedIds: Set<Long> = emptySet()
+    val selectedIds: Set<Long> = emptySet(),
+    val trashedAccounts: List<Account> = emptyList(),
+    val allCategoryModels: List<Category> = emptyList()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -83,7 +86,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val categories = withContext(Dispatchers.IO) {
                         repository.getAllCategories()
                     }
-                    _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size, allCategories = categories) }
+                    val categoryModels = withContext(Dispatchers.IO) {
+                        repository.getAllCategoriesList()
+                    }
+                    _uiState.update { it.copy(accounts = accounts, accountCount = accounts.size, allCategories = categories, allCategoryModels = categoryModels) }
                 }
         }
 
@@ -143,9 +149,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteAccount(account: Account) {
+    fun trashAccount(account: Account) {
         viewModelScope.launch {
-            repository.delete(account)
+            repository.softDelete(account.id)
+        }
+    }
+
+    fun updateAccount(account: Account) {
+        viewModelScope.launch {
+            repository.update(account)
+        }
+    }
+
+    fun restoreAccount(account: Account) {
+        viewModelScope.launch {
+            repository.restore(account.id)
+            refreshTrashed()
+        }
+    }
+
+    fun restoreAccount(id: Long) {
+        viewModelScope.launch {
+            repository.restore(id)
+            refreshTrashed()
+        }
+    }
+
+    fun permanentlyDelete(id: Long) {
+        viewModelScope.launch {
+            repository.deleteById(id)
+            refreshTrashed()
+        }
+    }
+
+    fun clearTrash() {
+        viewModelScope.launch {
+            repository.clearTrash()
+            refreshTrashed()
+        }
+    }
+
+    private fun refreshTrashed() {
+        viewModelScope.launch {
+            val trashed = withContext(Dispatchers.IO) { repository.getTrashedList() }
+            _uiState.update { it.copy(trashedAccounts = trashed) }
+        }
+    }
+
+    fun refreshTrashedAccounts() {
+        refreshTrashed()
+    }
+
+    fun addCategory(name: String, emoji: String, color: Int) {
+        viewModelScope.launch {
+            repository.insertCategory(Category(name = name, emoji = emoji, color = color))
+            refreshCategories()
+        }
+    }
+
+    fun deleteCategory(category: Category) {
+        viewModelScope.launch {
+            repository.deleteCategory(category)
+            refreshCategories()
+        }
+    }
+
+    private fun refreshCategories() {
+        viewModelScope.launch {
+            val cats = withContext(Dispatchers.IO) { repository.getAllCategoriesList() }
+            _uiState.update { it.copy(allCategoryModels = cats) }
         }
     }
 
@@ -207,12 +279,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- HomeScreen callback methods ---
-
-    fun deleteAccount(account: Account) {
-        viewModelScope.launch {
-            repository.delete(account)
-        }
-    }
 
     fun toggleFavorite(accountId: Long) {
         viewModelScope.launch {

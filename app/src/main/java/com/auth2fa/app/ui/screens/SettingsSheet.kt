@@ -27,6 +27,8 @@ fun SettingsSheet(
     onToggleNotification: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onTrashClick: () -> Unit,
+    onCategoryAdminClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -147,6 +149,20 @@ fun SettingsSheet(
                 title = "导入备份",
                 subtitle = "JSON 格式",
                 onClick = onImport
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Category,
+                title = "分类管理",
+                subtitle = "添加、编辑或删除分类",
+                onClick = onCategoryAdminClick
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Delete,
+                title = "回收站",
+                subtitle = "查看已删除的账户",
+                onClick = onTrashClick
             )
 
             Spacer(modifier = Modifier.height(20.dp))
