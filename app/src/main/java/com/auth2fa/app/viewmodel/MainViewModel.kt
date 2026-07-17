@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.auth2fa.app.App
 import com.auth2fa.app.data.Account
 import com.auth2fa.app.data.AccountRepository
+import com.auth2fa.app.data.CryptoUtils
+import com.auth2fa.app.totp.HOTPGenerator
 import com.auth2fa.app.totp.SteamTOTPGenerator
 import com.auth2fa.app.totp.TOTPGenerator
 import kotlinx.coroutines.Job
@@ -17,6 +19,9 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
 
 data class CodeEntry(
     val accountId: Long,
@@ -27,19 +32,25 @@ data class CodeEntry(
 
 enum class SortMode { NAME, RECENT }
 
+enum class ThemeMode { LIGHT, DARK, SYSTEM }
+
 data class AppUiState(
     val accounts: List<Account> = emptyList(),
+    val trashedAccounts: List<Account> = emptyList(),
     val codes: Map<Long, CodeEntry> = emptyMap(),
     val searchQuery: String = "",
-    val isDarkTheme: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.DARK,
     val accountCount: Int = 0,
     val biometricEnabled: Boolean = false,
     val autoLockEnabled: Boolean = false,
+    val pinEnabled: Boolean = false,
     val sortMode: SortMode = SortMode.NAME,
     val selectedCategory: String = "",
     val allCategories: List<String> = emptyList(),
     val isSelectMode: Boolean = false,
-    val selectedIds: Set<Long> = emptySet()
+    val selectedIds: Set<Long> = emptySet(),
+    val timeCorrection: Long = 0L,
+    val isMaterialYou: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -50,30 +61,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
     private var tickJob: Job? = null
-
-    // Search query flow with debounce
     private val _searchQuery = MutableStateFlow("")
     private var searchCollectionJob: Job? = null
-
-    // Track copied account ID for animation
     private val _copiedAccountId = MutableStateFlow<Long?>(null)
     val copiedAccountId: StateFlow<Long?> = _copiedAccountId.asStateFlow()
 
     init {
-        // Load preferences
         val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val isDark = prefs.getBoolean("dark_theme", true)
+        val themeOrdinal = prefs.getInt("theme_mode", ThemeMode.DARK.ordinal)
         val biometricEnabled = prefs.getBoolean("biometric_lock", false)
         val autoLockEnabled = prefs.getBoolean("auto_lock", false)
+        val pinEnabled = prefs.getBoolean("pin_enabled", false)
+        val timeCorrection = prefs.getLong("time_correction", 0L)
+        val isMaterialYou = prefs.getBoolean("material_you", false)
+
         _uiState.update {
             it.copy(
-                isDarkTheme = isDark,
+                themeMode = ThemeMode.entries.getOrElse(themeOrdinal) { ThemeMode.DARK },
                 biometricEnabled = biometricEnabled,
-                autoLockEnabled = autoLockEnabled
+                autoLockEnabled = autoLockEnabled,
+                pinEnabled = pinEnabled,
+                timeCorrection = timeCorrection,
+                isMaterialYou = isMaterialYou
             )
         }
 
-        // Observe accounts with debounced search + category filter
+        // Observe active accounts
         searchCollectionJob = viewModelScope.launch {
             combine(
                 _searchQuery.debounce(300),
@@ -98,14 +111,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
         }
 
-        // Load categories
+        // Observe trashed accounts
         viewModelScope.launch {
-            val cats = repository.getAllCategories()
-            _uiState.update { it.copy(allCategories = cats) }
+            repository.trashedAccounts.collect { trashed ->
+                _uiState.update { it.copy(trashedAccounts = trashed) }
+            }
         }
 
+        refreshCategories()
         startTicking()
     }
+
+    // ---- TOTP/HOTP Code Generation ----
 
     private fun startTicking() {
         tickJob?.cancel()
@@ -120,24 +137,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun generateAllCodes() {
         val accounts = _uiState.value.accounts
         val codes = mutableMapOf<Long, CodeEntry>()
-        val now = System.currentTimeMillis() / 1000
+        val rawNow = System.currentTimeMillis() / 1000
+        val now = rawNow + _uiState.value.timeCorrection
 
         for (account in accounts) {
             try {
-                val code = if (account.isSteam) {
-                    SteamTOTPGenerator.generate(account.secret, now)
-                } else {
-                    TOTPGenerator.generate(account.secret, account.digits, account.period, now)
-                }
-                val remaining = if (account.isSteam) {
-                    SteamTOTPGenerator.getTimeRemaining(now)
-                } else {
-                    TOTPGenerator.getTimeRemaining(account.period, now)
-                }
-                val progress = if (account.isSteam) {
-                    SteamTOTPGenerator.getProgress(now)
-                } else {
-                    TOTPGenerator.getProgress(account.period, now)
+                val (code, remaining, progress) = when (account.accountType) {
+                    "STEAM" -> {
+                        val c = SteamTOTPGenerator.generate(account.secret, now)
+                        Triple(c, SteamTOTPGenerator.getTimeRemaining(now),
+                            SteamTOTPGenerator.getProgress(now))
+                    }
+                    "HOTP" -> {
+                        val c = HOTPGenerator.generate(account.secret, account.hotpCounter, account.digits)
+                        // HOTP has no time remaining; show counter
+                        Triple(c, 0, 0f)
+                    }
+                    else -> {
+                        val c = TOTPGenerator.generate(account.secret, account.digits, account.period, now)
+                        Triple(c, TOTPGenerator.getTimeRemaining(account.period, now),
+                            TOTPGenerator.getProgress(account.period, now))
+                    }
                 }
                 codes[account.id] = CodeEntry(account.id, code, remaining, progress)
             } catch (e: Exception) {
@@ -148,19 +168,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(codes = codes) }
     }
 
+    fun incrementHotpCounter(accountId: Long) {
+        viewModelScope.launch {
+            val account = repository.getById(accountId) ?: return@launch
+            if (account.accountType != "HOTP") return@launch
+            val newCounter = account.hotpCounter + 1
+            repository.updateHotpCounter(accountId, newCounter)
+        }
+    }
+
+    // ---- Search ----
+
     fun updateSearch(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
         _searchQuery.value = query
     }
 
-    fun addAccount(issuer: String, name: String, secret: String, isSteam: Boolean = false) {
+    // ---- CRUD ----
+
+    fun addAccount(
+        issuer: String, name: String, secret: String,
+        accountType: String = "TOTP", digits: Int = 6, period: Int = 30
+    ) {
         viewModelScope.launch {
             repository.insert(
                 Account(
                     issuer = issuer.trim(),
                     name = name.trim(),
                     secret = secret.uppercase().replace("[^A-Z2-7]".toRegex(), ""),
-                    isSteam = isSteam
+                    digits = digits,
+                    period = period,
+                    accountType = accountType,
+                    hotpCounter = if (accountType == "HOTP") 0L else 0L
                 )
             )
             refreshCategories()
@@ -173,6 +212,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             refreshCategories()
         }
     }
+
+    // ---- Soft Delete (Trash) ----
+
+    fun trashAccount(account: Account) {
+        viewModelScope.launch {
+            repository.softDelete(account.id)
+            refreshCategories()
+        }
+    }
+
+    fun trashSelectedAccounts() {
+        viewModelScope.launch {
+            val ids = _uiState.value.selectedIds.toList()
+            for (id in ids) repository.softDelete(id)
+            _uiState.update { it.copy(isSelectMode = false, selectedIds = emptySet()) }
+            refreshCategories()
+        }
+    }
+
+    fun restoreAccount(id: Long) {
+        viewModelScope.launch { repository.restore(id) }
+    }
+
+    fun permanentlyDelete(id: Long) {
+        viewModelScope.launch { repository.deleteById(id) }
+    }
+
+    fun clearTrash() {
+        viewModelScope.launch { repository.clearTrash() }
+    }
+
+    // ---- Hard Delete ----
 
     fun deleteAccount(account: Account) {
         viewModelScope.launch {
@@ -190,32 +261,110 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ---- Export (with optional encryption) ----
+
     fun exportSelectedAccounts(onResult: (String) -> Unit) {
         viewModelScope.launch {
             val ids = _uiState.value.selectedIds
             val allAccounts = repository.getAllList()
             val selected = allAccounts.filter { it.id in ids }
-            val jsonArr = JSONArray()
-            for (a in selected) {
-                val obj = JSONObject()
-                obj.put("issuer", a.issuer)
-                obj.put("name", a.name)
-                obj.put("secret", a.secret)
-                obj.put("digits", a.digits)
-                obj.put("period", a.period)
-                obj.put("isSteam", a.isSteam)
-                jsonArr.put(obj)
-            }
-            onResult(jsonArr.toString(2))
+            val json = buildExportJson(selected)
+            onResult(json)
             _uiState.update { it.copy(isSelectMode = false, selectedIds = emptySet()) }
         }
     }
+
+    fun getExportJson(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val json = try {
+                val accounts = repository.getAllList()
+                buildExportJson(accounts)
+            } catch (e: Exception) { "[]" }
+            onResult(json)
+        }
+    }
+
+    fun getEncryptedExportJson(password: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val accounts = repository.getAllList()
+                val json = buildExportJson(accounts)
+                val encrypted = CryptoUtils.encrypt(json, password)
+                onResult(encrypted)
+            } catch (e: Exception) { onResult(null) }
+        }
+    }
+
+    fun importFromEncryptedJson(encrypted: String, password: String, onResult: (Int) -> Unit) {
+        viewModelScope.launch {
+            val json = CryptoUtils.decrypt(encrypted, password)
+            if (json != null) {
+                importFromJson(json, onResult)
+            } else {
+                onResult(-2) // -2 = wrong password
+            }
+        }
+    }
+
+    private fun buildExportJson(accounts: List<Account>): String {
+        val jsonArr = JSONArray()
+        for (a in accounts) {
+            val obj = JSONObject()
+            obj.put("issuer", a.issuer)
+            obj.put("name", a.name)
+            obj.put("secret", a.secret)
+            obj.put("digits", a.digits)
+            obj.put("period", a.period)
+            obj.put("accountType", a.accountType)
+            obj.put("hotpCounter", a.hotpCounter)
+            obj.put("category", a.category)
+            obj.put("note", a.note)
+            obj.put("customEmoji", a.customEmoji)
+            obj.put("customColor", a.customColor)
+            jsonArr.put(obj)
+        }
+        return jsonArr.toString(2)
+    }
+
+    fun importFromJson(json: String, onResult: (Int) -> Unit) {
+        viewModelScope.launch {
+            val count = try {
+                val jsonArr = JSONArray(json)
+                val accounts = mutableListOf<Account>()
+                for (i in 0 until jsonArr.length()) {
+                    val obj = jsonArr.getJSONObject(i)
+                    accounts.add(
+                        Account(
+                            issuer = obj.getString("issuer"),
+                            name = obj.optString("name", ""),
+                            secret = obj.getString("secret"),
+                            digits = obj.optInt("digits", 6),
+                            period = obj.optInt("period", 30),
+                            accountType = obj.optString("accountType", "TOTP"),
+                            hotpCounter = obj.optLong("hotpCounter", 0),
+                            category = obj.optString("category", ""),
+                            note = obj.optString("note", ""),
+                            customEmoji = obj.optString("customEmoji", ""),
+                            customColor = obj.optInt("customColor", 0)
+                        )
+                    )
+                }
+                repository.insertAll(accounts)
+                refreshCategories()
+                accounts.size
+            } catch (e: Exception) { -1 }
+            onResult(count)
+        }
+    }
+
+    // ---- Copy Code ----
 
     fun copyCode(accountId: Long) {
         val entry = _uiState.value.codes[accountId] ?: return
         val code = entry.code ?: return
 
-        val clipboard = getApplication<App>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val app = getApplication<App>()
+        val clipboard = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("2FA Code", code))
 
         _copiedAccountId.value = accountId
@@ -223,7 +372,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             delay(1500)
             _copiedAccountId.value = null
         }
-        // Clear clipboard after 30 seconds for security
         viewModelScope.launch {
             delay(30_000)
             if (clipboard.hasPrimaryClip() &&
@@ -233,6 +381,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    // ---- Favorites ----
 
     fun toggleFavorite(accountId: Long) {
         viewModelScope.launch {
@@ -251,19 +401,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedCategory = category) }
     }
 
-    private suspend fun refreshCategories() {
-        val cats = repository.getAllCategories()
-        _uiState.update { it.copy(allCategories = cats) }
+    private fun refreshCategories() {
+        viewModelScope.launch {
+            val cats = repository.getAllCategories()
+            _uiState.update { it.copy(allCategories = cats) }
+        }
     }
 
     // ---- Select Mode ----
 
     fun toggleSelectMode() {
         _uiState.update {
-            it.copy(
-                isSelectMode = !it.isSelectMode,
-                selectedIds = emptySet()
-            )
+            it.copy(isSelectMode = !it.isSelectMode, selectedIds = emptySet())
         }
     }
 
@@ -276,9 +425,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectAll() {
-        _uiState.update {
-            it.copy(selectedIds = it.accounts.map { a -> a.id }.toSet())
-        }
+        _uiState.update { it.copy(selectedIds = it.accounts.map { a -> a.id }.toSet()) }
     }
 
     fun clearSelection() {
@@ -287,17 +434,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Theme ----
 
-    fun toggleTheme() {
+    fun cycleTheme() {
         val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val current = _uiState.value.isDarkTheme
-        prefs.edit().putBoolean("dark_theme", !current).apply()
-        _uiState.update { it.copy(isDarkTheme = !current) }
+        val modes = ThemeMode.entries
+        val current = _uiState.value.themeMode
+        val next = modes[(current.ordinal + 1) % modes.size]
+        prefs.edit().putInt("theme_mode", next.ordinal).apply()
+        _uiState.update { it.copy(themeMode = next) }
     }
+
+    fun toggleMaterialYou() {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val current = _uiState.value.isMaterialYou
+        prefs.edit().putBoolean("material_you", !current).apply()
+        _uiState.update { it.copy(isMaterialYou = !current) }
+    }
+
+    // ---- Biometric & PIN ----
 
     fun toggleBiometric(enabled: Boolean) {
         val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("biometric_lock", enabled).apply()
         _uiState.update { it.copy(biometricEnabled = enabled) }
+        if (!enabled && !_uiState.value.pinEnabled) {
+            // No lock enabled
+        }
     }
 
     fun toggleAutoLock(enabled: Boolean) {
@@ -306,65 +467,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(autoLockEnabled = enabled) }
     }
 
-    // ---- Export / Import ----
+    // ---- PIN Management ----
 
-    fun getExportJson(onResult: (String) -> Unit) {
-        viewModelScope.launch {
-            val json = try {
-                val jsonArr = JSONArray()
-                val scopeAccounts = repository.getAllList()
-                for (a in scopeAccounts) {
-                    val obj = JSONObject()
-                    obj.put("issuer", a.issuer)
-                    obj.put("name", a.name)
-                    obj.put("secret", a.secret)
-                    obj.put("digits", a.digits)
-                    obj.put("period", a.period)
-                    obj.put("isSteam", a.isSteam)
-                    jsonArr.put(obj)
-                }
-                jsonArr.toString(2)
-            } catch (e: Exception) {
-                "[]"
-            }
-            onResult(json)
-        }
+    fun isPinSet(): Boolean {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        return prefs.contains("pin_hash")
     }
 
-    fun importFromJson(json: String, onResult: (Int) -> Unit) {
-        viewModelScope.launch {
-            val count = try {
-                val jsonArr = JSONArray(json)
-                val accounts = mutableListOf<Account>()
-                for (i in 0 until jsonArr.length()) {
-                    val obj = jsonArr.getJSONObject(i)
-                    accounts.add(
-                        Account(
-                            issuer = obj.getString("issuer"),
-                            name = obj.optString("name", ""),
-                            secret = obj.getString("secret"),
-                            digits = obj.optInt("digits", 6),
-                            period = obj.optInt("period", 30),
-                            isSteam = obj.optBoolean("isSteam", false)
-                        )
-                    )
-                }
-                repository.insertAll(accounts)
-                refreshCategories()
-                accounts.size
-            } catch (e: Exception) {
-                -1
-            }
-            onResult(count)
-        }
+    fun setPin(pin: String): Boolean {
+        return try {
+            val hash = hashPin(pin)
+            val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+            prefs.edit().putString("pin_hash", hash).putBoolean("pin_enabled", true).apply()
+            _uiState.update { it.copy(pinEnabled = true) }
+            true
+        } catch (e: Exception) { false }
     }
+
+    fun verifyPin(pin: String): Boolean {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val storedHash = prefs.getString("pin_hash", null) ?: return false
+        return hashPin(pin) == storedHash
+    }
+
+    fun disablePin() {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().remove("pin_hash").putBoolean("pin_enabled", false).apply()
+        _uiState.update { it.copy(pinEnabled = false) }
+    }
+
+    private fun hashPin(pin: String): String {
+        val salt = "2fa-native-pin-salt".toByteArray()
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(salt)
+        val hash = digest.digest(pin.toByteArray())
+        return Base64.getEncoder().encodeToString(hash)
+    }
+
+    // ---- Time Correction ----
+
+    fun setTimeCorrection(offsetSeconds: Long) {
+        val prefs = getApplication<App>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit().putLong("time_correction", offsetSeconds).apply()
+        _uiState.update { it.copy(timeCorrection = offsetSeconds) }
+    }
+
+    // ---- QR URI Parsing ----
 
     fun parseAndAddFromUri(uri: String): Boolean {
         return try {
             if (!uri.startsWith("otpauth://")) return false
-
             val parsed = java.net.URI(uri)
-            if (parsed.host != "totp") return false
+            val host = parsed.host
 
             val query = parsed.query ?: ""
             val params = query.split("&").associate {
@@ -375,7 +529,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val secret = params["secret"] ?: return false
             val issuerFromParam = params["issuer"] ?: ""
+            val digits = params["digits"]?.toIntOrNull() ?: 6
+            val period = params["period"]?.toIntOrNull() ?: 30
+            val counter = params["counter"]?.toLongOrNull() ?: 0L
             val path = parsed.path.removePrefix("/")
+
+            val accountType = when (host) {
+                "hotp" -> "HOTP"
+                "totp" -> "TOTP"
+                else -> return false
+            }
 
             val (finalIssuer, finalName) = when {
                 path.isEmpty() -> issuerFromParam to ""
@@ -388,15 +551,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             if (finalIssuer.isBlank()) return false
 
-            addAccount(finalIssuer, finalName, secret)
+            repository.insert(
+                Account(
+                    issuer = finalIssuer,
+                    name = finalName,
+                    secret = secret,
+                    digits = digits,
+                    period = period,
+                    accountType = accountType,
+                    hotpCounter = counter
+                )
+            )
+            refreshCategories()
             true
-        } catch (e: Exception) {
-            false
-        }
+        } catch (e: Exception) { false }
     }
 
-    // ---- Auto-lock support ----
+    // ---- Lock Support ----
+
     fun isAutoLockEnabled(): Boolean = _uiState.value.autoLockEnabled
+    fun isBiometricEnabled(): Boolean = _uiState.value.biometricEnabled
+    fun isPinEnabled(): Boolean = _uiState.value.pinEnabled
 
     override fun onCleared() {
         super.onCleared()

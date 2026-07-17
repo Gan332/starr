@@ -38,7 +38,8 @@ fun HomeScreen(
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
     onDeleteSelected: () -> Unit,
-    onExportSelected: () -> Unit
+    onExportSelected: () -> Unit,
+    onIncrementHotp: (Long) -> Unit
 ) {
     var searchText by remember { mutableStateOf("") }
     var deleteConfirmAccount by remember { mutableStateOf<Account?>(null) }
@@ -52,95 +53,47 @@ fun HomeScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             if (uiState.isSelectMode) {
-                // Selection mode top bar
                 TopAppBar(
-                    title = {
-                        Text(
-                            text = "已选 ${uiState.selectedIds.size} 项",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
-                        )
-                    },
+                    title = { Text("已选 ${uiState.selectedIds.size} 项", fontWeight = FontWeight.Bold, fontSize = 20.sp) },
                     navigationIcon = {
-                        IconButton(onClick = {
-                            onToggleSelectMode()
-                            onClearSelection()
-                        }) {
+                        IconButton(onClick = { onToggleSelectMode(); onClearSelection() }) {
                             Icon(Icons.Default.Close, contentDescription = "退出选择",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
                     actions = {
                         TextButton(onClick = {
-                            if (uiState.selectedIds.size == uiState.accounts.size)
-                                onClearSelection()
-                            else
-                                onSelectAll()
-                        }) {
-                            Text(
-                                if (uiState.selectedIds.size == uiState.accounts.size) "取消全选" else "全选",
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
+                            if (uiState.selectedIds.size == uiState.accounts.size) onClearSelection() else onSelectAll()
+                        }) { Text(if (uiState.selectedIds.size == uiState.accounts.size) "取消全选" else "全选") }
                         Box {
                             IconButton(onClick = { showBatchMenu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "批量操作",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            DropdownMenu(
-                                expanded = showBatchMenu,
-                                onDismissRequest = { showBatchMenu = false }
-                            ) {
+                            DropdownMenu(expanded = showBatchMenu, onDismissRequest = { showBatchMenu = false }) {
                                 DropdownMenuItem(
-                                    text = { Text("导出所选") },
-                                    onClick = {
-                                        showBatchMenu = false
-                                        onExportSelected()
-                                    },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Upload, contentDescription = null)
-                                    }
+                                    text = { Text("导出所选") }, onClick = { showBatchMenu = false; onExportSelected() },
+                                    leadingIcon = { Icon(Icons.Default.Upload, null) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("删除所选") },
-                                    onClick = {
-                                        showBatchMenu = false
-                                        showDeleteSelectedConfirm = true
-                                    },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Delete, contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.error)
-                                    }
+                                    text = { Text("删除所选") }, onClick = { showBatchMenu = false; showDeleteSelectedConfirm = true },
+                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }
                                 )
                             }
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background
-                    )
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
                 )
             } else {
-                // Normal top bar
                 TopAppBar(
-                    title = {
-                        Text(
-                            text = "Authenticator",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 26.sp
-                        )
-                    },
+                    title = { Text("Authenticator", fontWeight = FontWeight.Bold, fontSize = 26.sp) },
                     actions = {
                         IconButton(onClick = onSettingsClick) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = "设置",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Icon(Icons.Default.Settings, contentDescription = "设置",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background
-                    )
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
                 )
             }
         },
@@ -151,49 +104,25 @@ fun HomeScreen(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = MaterialTheme.shapes.extraLarge,
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    icon = { Icon(Icons.Default.Add, null) },
                     text = { Text("添加") }
                 )
             }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            // Search bar (hidden in select mode)
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (!uiState.isSelectMode) {
                 OutlinedTextField(
                     value = searchText,
-                    onValueChange = {
-                        searchText = it
-                        onSearch(it)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    placeholder = {
-                        Text("搜索账户...", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
+                    onValueChange = { searchText = it; onSearch(it) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    placeholder = { Text("搜索账户...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     trailingIcon = {
                         if (searchText.isNotEmpty()) {
-                            IconButton(onClick = {
-                                searchText = ""
-                                onSearch("")
-                            }) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "清除",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            IconButton(onClick = { searchText = ""; onSearch("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "清除",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     },
@@ -207,178 +136,68 @@ fun HomeScreen(
                     singleLine = true
                 )
 
-                // Sort & filter row
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Sort button
                     Box {
                         AssistChip(
                             onClick = { showSortMenu = true },
-                            label = {
-                                Text(
-                                    when (uiState.sortMode) {
-                                        SortMode.NAME -> "按名称"
-                                        SortMode.RECENT -> "最近添加"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Sort,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            },
+                            label = { Text(when (uiState.sortMode) { SortMode.NAME -> "按名称" SortMode.RECENT -> "最近添加" }, style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = { Icon(Icons.Default.Sort, null, Modifier.size(16.dp)) },
                             shape = MaterialTheme.shapes.small
                         )
-                        DropdownMenu(
-                            expanded = showSortMenu,
-                            onDismissRequest = { showSortMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("按名称") },
-                                onClick = {
-                                    onSetSortMode(SortMode.NAME)
-                                    showSortMenu = false
-                                },
-                                leadingIcon = {
-                                    if (uiState.sortMode == SortMode.NAME)
-                                        Icon(Icons.Default.Check, contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("最近添加") },
-                                onClick = {
-                                    onSetSortMode(SortMode.RECENT)
-                                    showSortMenu = false
-                                },
-                                leadingIcon = {
-                                    if (uiState.sortMode == SortMode.RECENT)
-                                        Icon(Icons.Default.Check, contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary)
-                                }
-                            )
+                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                            DropdownMenuItem(text = { Text("按名称") }, onClick = { onSetSortMode(SortMode.NAME); showSortMenu = false },
+                                leadingIcon = { if (uiState.sortMode == SortMode.NAME) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary) })
+                            DropdownMenuItem(text = { Text("最近添加") }, onClick = { onSetSortMode(SortMode.RECENT); showSortMenu = false },
+                                leadingIcon = { if (uiState.sortMode == SortMode.RECENT) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary) })
                         }
                     }
 
-                    // Category filter button
                     Box {
                         AssistChip(
                             onClick = { showCategoryMenu = true },
-                            label = {
-                                Text(
-                                    if (uiState.selectedCategory.isEmpty()) "全部分类"
-                                    else uiState.selectedCategory,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.FilterList,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            },
+                            label = { Text(if (uiState.selectedCategory.isEmpty()) "全部分类" else uiState.selectedCategory, style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(16.dp)) },
                             shape = MaterialTheme.shapes.small
                         )
-                        DropdownMenu(
-                            expanded = showCategoryMenu,
-                            onDismissRequest = { showCategoryMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("全部分类") },
-                                onClick = {
-                                    onSelectCategory("")
-                                    showCategoryMenu = false
-                                },
-                                leadingIcon = {
-                                    if (uiState.selectedCategory.isEmpty())
-                                        Icon(Icons.Default.Check, contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary)
-                                }
-                            )
+                        DropdownMenu(expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false }) {
+                            DropdownMenuItem(text = { Text("全部分类") }, onClick = { onSelectCategory(""); showCategoryMenu = false },
+                                leadingIcon = { if (uiState.selectedCategory.isEmpty()) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary) })
                             uiState.allCategories.forEach { cat ->
-                                DropdownMenuItem(
-                                    text = { Text(cat) },
-                                    onClick = {
-                                        onSelectCategory(cat)
-                                        showCategoryMenu = false
-                                    },
-                                    leadingIcon = {
-                                        if (uiState.selectedCategory == cat)
-                                            Icon(Icons.Default.Check, contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary)
-                                    }
-                                )
+                                DropdownMenuItem(text = { Text(cat) }, onClick = { onSelectCategory(cat); showCategoryMenu = false },
+                                    leadingIcon = { if (uiState.selectedCategory == cat) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary) })
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    // Select mode toggle
-                    IconButton(
-                        onClick = onToggleSelectMode,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Checklist,
-                            contentDescription = "选择模式",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = onToggleSelectMode, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Checklist, contentDescription = "选择模式",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
                 }
             }
 
-            // Account list
             if (uiState.accounts.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(32.dp)
-                    ) {
-                        Text(
-                            text = "\uD83D\uDD10",
-                            fontSize = 64.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "还没有账户",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "点击下方按钮添加您的第一个双重验证账户",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Text("\uD83D\uDD10", fontSize = 64.sp)
+                        Spacer(Modifier.height(16.dp))
+                        Text("还没有账户", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text("点击下方按钮添加您的第一个双重验证账户",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = 16.dp, end = 16.dp,
-                        top = 4.dp, bottom = 96.dp
-                    ),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(
-                        items = uiState.accounts,
-                        key = { it.id }
-                    ) { account ->
+                    items(uiState.accounts, key = { it.id }) { account ->
                         AccountCard(
                             account = account,
                             codeEntry = uiState.codes[account.id],
@@ -389,81 +208,48 @@ fun HomeScreen(
                             onDelete = { deleteConfirmAccount = account },
                             onEdit = { editTargetAccount = account },
                             onToggleFavorite = { onToggleFavorite(account.id) },
-                            onToggleSelect = { onToggleSelectId(account.id) }
+                            onToggleSelect = { onToggleSelectId(account.id) },
+                            onIncrementHotp = { onIncrementHotp(account.id) }
                         )
                     }
                 }
             }
 
-            // Delete single account confirmation dialog
             if (deleteConfirmAccount != null) {
                 AlertDialog(
                     onDismissRequest = { deleteConfirmAccount = null },
                     title = { Text("删除账户") },
-                    text = {
-                        Text("确定要删除 ${deleteConfirmAccount?.issuer} 吗？此操作无法撤销。")
-                    },
+                    text = { Text("确定要删除 ${deleteConfirmAccount?.issuer} 吗？它将移入回收站。") },
                     confirmButton = {
-                        TextButton(
-                            onClick = {
-                                deleteConfirmAccount?.let { onDeleteAccount(it) }
-                                deleteConfirmAccount = null
-                            },
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Text("删除")
-                        }
+                        TextButton(onClick = {
+                            deleteConfirmAccount?.let { onDeleteAccount(it) }
+                            deleteConfirmAccount = null
+                        }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("删除") }
                     },
-                    dismissButton = {
-                        TextButton(onClick = { deleteConfirmAccount = null }) {
-                            Text("取消")
-                        }
-                    }
+                    dismissButton = { TextButton(onClick = { deleteConfirmAccount = null }) { Text("取消") } }
                 )
             }
 
-            // Delete selected confirmation dialog
             if (showDeleteSelectedConfirm) {
                 AlertDialog(
                     onDismissRequest = { showDeleteSelectedConfirm = false },
                     title = { Text("批量删除") },
-                    text = {
-                        Text("确定要删除已选的 ${uiState.selectedIds.size} 个账户吗？此操作无法撤销。")
-                    },
+                    text = { Text("确定要删除已选的 ${uiState.selectedIds.size} 个账户吗？它们将移入回收站。") },
                     confirmButton = {
-                        TextButton(
-                            onClick = {
-                                onDeleteSelected()
-                                showDeleteSelectedConfirm = false
-                            },
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Text("删除")
-                        }
+                        TextButton(onClick = { onDeleteSelected(); showDeleteSelectedConfirm = false },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("删除") }
                     },
-                    dismissButton = {
-                        TextButton(onClick = { showDeleteSelectedConfirm = false }) {
-                            Text("取消")
-                        }
-                    }
+                    dismissButton = { TextButton(onClick = { showDeleteSelectedConfirm = false }) { Text("取消") } }
                 )
             }
         }
     }
 
-    // Edit account sheet
     if (editTargetAccount != null) {
         EditAccountSheet(
             account = editTargetAccount!!,
             onDismiss = { editTargetAccount = null },
-            onSave = { updated ->
-                onEditAccount(updated)
-                editTargetAccount = null
-            }
+            onSave = { updated -> onEditAccount(updated); editTargetAccount = null }
         )
     }
 }

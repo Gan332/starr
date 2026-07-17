@@ -1,6 +1,7 @@
 package com.auth2fa.app.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -8,9 +9,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import com.auth2fa.app.viewmodel.ThemeMode
 
 // Rounded corner sizes
 val RoundedSm = 12.dp
@@ -72,10 +75,27 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun Auth2FATheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = ThemeMode.DARK,
+    useMaterialYou: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val context = LocalContext.current
+
+    val darkTheme = when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+
+    val colorScheme = when {
+        useMaterialYou && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val dynamic = dynamicLightColorScheme(context)
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamic
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
     val view = LocalView.current
 
     if (!view.isInEditMode) {

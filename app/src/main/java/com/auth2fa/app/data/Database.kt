@@ -21,33 +21,60 @@ data class Account(
     @ColumnInfo(name = "note") val note: String = "",
     @ColumnInfo(name = "custom_emoji") val customEmoji: String = "",
     @ColumnInfo(name = "custom_color") val customColor: Int = 0,
-    @ColumnInfo(name = "is_steam") val isSteam: Boolean = false,
+    @ColumnInfo(name = "account_type") val accountType: String = "TOTP",
+    @ColumnInfo(name = "hotp_counter") val hotpCounter: Long = 0,
+    @ColumnInfo(name = "is_trashed") val isTrashed: Boolean = false,
+    @ColumnInfo(name = "trashed_at") val trashedAt: Long? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
-/**
- * Room DAO for account operations.
- */
 @Dao
 interface AccountDao {
-    @Query("SELECT * FROM accounts ORDER BY is_favorite DESC, issuer ASC")
+    // Active accounts
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, issuer ASC")
     fun getAll(): Flow<List<Account>>
 
-    @Query("SELECT * FROM accounts ORDER BY is_favorite DESC, issuer ASC")
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, issuer ASC")
     suspend fun getAllList(): List<Account>
 
-    @Query("SELECT * FROM accounts ORDER BY is_favorite DESC, createdAt DESC")
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, createdAt DESC")
     suspend fun getAllByRecent(): List<Account>
 
-    @Query("SELECT * FROM accounts WHERE issuer LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%' ORDER BY is_favorite DESC, issuer ASC")
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND (issuer LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%') ORDER BY is_favorite DESC, issuer ASC")
     fun search(query: String): Flow<List<Account>>
 
-    @Query("SELECT * FROM accounts WHERE category = :category ORDER BY is_favorite DESC, issuer ASC")
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND category = :category ORDER BY is_favorite DESC, issuer ASC")
     fun getByCategory(category: String): Flow<List<Account>>
 
-    @Query("SELECT DISTINCT category FROM accounts WHERE category != '' ORDER BY category ASC")
+    @Query("SELECT DISTINCT category FROM accounts WHERE is_trashed = 0 AND category != '' ORDER BY category ASC")
     suspend fun getAllCategories(): List<String>
 
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 AND id = :id")
+    suspend fun getById(id: Long): Account?
+
+    @Query("SELECT COUNT(*) FROM accounts WHERE is_trashed = 0")
+    suspend fun count(): Int
+
+    // Trash
+    @Query("SELECT * FROM accounts WHERE is_trashed = 1 ORDER BY trashed_at DESC")
+    fun getTrashed(): Flow<List<Account>>
+
+    @Query("SELECT * FROM accounts WHERE is_trashed = 1 ORDER BY trashed_at DESC")
+    suspend fun getTrashedList(): List<Account>
+
+    @Query("UPDATE accounts SET is_trashed = 1, trashed_at = :now WHERE id = :id")
+    suspend fun softDelete(id: Long, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE accounts SET is_trashed = 0, trashed_at = NULL WHERE id = :id")
+    suspend fun restore(id: Long)
+
+    @Query("DELETE FROM accounts WHERE is_trashed = 1")
+    suspend fun clearTrash()
+
+    @Query("DELETE FROM accounts WHERE is_trashed = 1 AND trashed_at < :before")
+    suspend fun purgeOldTrash(before: Long)
+
+    // Mutations
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(account: Account): Long
 
@@ -66,23 +93,16 @@ interface AccountDao {
     @Query("DELETE FROM accounts WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
-    @Query("SELECT * FROM accounts WHERE id = :id")
-    suspend fun getById(id: Long): Account?
-
-    @Query("SELECT COUNT(*) FROM accounts")
-    suspend fun count(): Int
-
     @Query("UPDATE accounts SET is_favorite = :isFavorite WHERE id = :id")
     suspend fun setFavorite(id: Long, isFavorite: Boolean)
 
-    @Query("SELECT * FROM accounts ORDER BY is_favorite DESC, createdAt DESC")
+    @Query("UPDATE accounts SET hotp_counter = :counter WHERE id = :id")
+    suspend fun updateHotpCounter(id: Long, counter: Long)
+
+    @Query("SELECT * FROM accounts WHERE is_trashed = 0 ORDER BY is_favorite DESC, createdAt DESC")
     fun getAllRecentFlow(): Flow<List<Account>>
 }
-
-/**
- * Room database for the app.
- */
-@Database(entities = [Account::class], version = 2, exportSchema = false)
+@Database(entities = [Account::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
 
@@ -111,34 +131,34 @@ abstract class AppDatabase : RoomDatabase() {
 class AccountRepository(private val dao: AccountDao) {
 
     val allAccounts = dao.getAll()
+    val trashedAccounts = dao.getTrashed()
 
     fun search(query: String) = dao.search(query)
-
     fun getByCategory(category: String) = dao.getByCategory(category)
 
     suspend fun insert(account: Account): Long = dao.insert(account)
-
     suspend fun insertAll(accounts: List<Account>) = dao.insertAll(accounts)
-
     suspend fun update(account: Account) = dao.update(account)
 
+    // Soft delete (move to trash)
+    suspend fun softDelete(id: Long) = dao.softDelete(id)
+    suspend fun restore(id: Long) = dao.restore(id)
+    suspend fun clearTrash() = dao.clearTrash()
+    suspend fun getTrashedList(): List<Account> = dao.getTrashedList()
+    suspend fun purgeOldTrash(before: Long) = dao.purgeOldTrash(before)
+
+    // Hard delete
     suspend fun delete(account: Account) = dao.delete(account)
-
     suspend fun deleteById(id: Long) = dao.deleteById(id)
-
     suspend fun deleteByIds(ids: List<Long>) = dao.deleteByIds(ids)
 
     suspend fun getAllList(): List<Account> = dao.getAllList()
-
     suspend fun getAllByRecent(): List<Account> = dao.getAllByRecent()
-
     suspend fun getById(id: Long): Account? = dao.getById(id)
-
     suspend fun count(): Int = dao.count()
-
     suspend fun getAllCategories(): List<String> = dao.getAllCategories()
-
     suspend fun setFavorite(id: Long, isFavorite: Boolean) = dao.setFavorite(id, isFavorite)
+    suspend fun updateHotpCounter(id: Long, counter: Long) = dao.updateHotpCounter(id, counter)
 
     fun getAllRecentFlow() = dao.getAllRecentFlow()
 

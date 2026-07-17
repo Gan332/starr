@@ -24,29 +24,28 @@ import androidx.compose.ui.unit.sp
 import com.auth2fa.app.ui.components.QRScanner
 import com.auth2fa.app.ui.theme.*
 
-/**
- * Bottom sheet content for adding a new 2FA account.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddAccountSheet(
     onDismiss: () -> Unit,
-    onAdd: (issuer: String, name: String, secret: String, isSteam: Boolean) -> Unit,
+    onAdd: (issuer: String, name: String, secret: String, accountType: String) -> Unit,
     onScannedUri: (String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val focusManager = LocalFocusManager.current
 
-    // Form state
     var issuer by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     var isSecretValid by remember { mutableStateOf(true) }
-    var isSteam by remember { mutableStateOf(false) }
+    var accountType by remember { mutableStateOf("TOTP") }
+    var digits by remember { mutableIntStateOf(6) }
     val isFormValid = issuer.isNotBlank() && secret.isNotBlank()
 
-    // QR scan active state
     var qrActive by remember { mutableStateOf(true) }
+
+    val accountTypes = listOf("TOTP", "HOTP", "STEAM")
+    var typeExpanded by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -70,7 +69,6 @@ fun AddAccountSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Tab row
             TabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -92,7 +90,7 @@ fun AddAccountSheet(
                     onClick = { selectedTab = 0; qrActive = false },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Keyboard, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Keyboard, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("手动输入")
                         }
@@ -105,7 +103,7 @@ fun AddAccountSheet(
                     onClick = { selectedTab = 1; qrActive = true },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.QrCodeScanner, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("扫码")
                         }
@@ -117,10 +115,8 @@ fun AddAccountSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Tab content
             when (selectedTab) {
                 0 -> {
-                    // Manual entry form
                     OutlinedTextField(
                         value = issuer,
                         onValueChange = { issuer = it },
@@ -157,6 +153,63 @@ fun AddAccountSheet(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // Account type dropdown
+                    ExposedDropdownMenuBox(
+                        expanded = typeExpanded,
+                        onExpandedChange = { typeExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = accountType,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("账户类型") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            shape = MaterialTheme.shapes.medium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = typeExpanded,
+                            onDismissRequest = { typeExpanded = false }
+                        ) {
+                            accountTypes.forEach { type ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                when (type) {
+                                                    "TOTP" -> "TOTP（基于时间）"
+                                                    "HOTP" -> "HOTP（基于计数器）"
+                                                    "STEAM" -> "Steam（自定义格式）"
+                                                    else -> type
+                                                }
+                                            )
+                                            Text(
+                                                when (type) {
+                                                    "TOTP" -> "标准 30 秒周期验证码"
+                                                    "HOTP" -> "基于计数器的验证码"
+                                                    "STEAM" -> "5 位字母代码"
+                                                    else -> ""
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        accountType = type
+                                        typeExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     OutlinedTextField(
                         value = secret,
                         onValueChange = {
@@ -182,48 +235,18 @@ fun AddAccountSheet(
                         ),
                         keyboardActions = KeyboardActions(onDone = {
                             focusManager.clearFocus()
-                            if (isFormValid) {
-                                onAdd(issuer, name, secret, isSteam)
-                                onDismiss()
-                            }
                         }),
                         textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
                     )
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Steam toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = isSteam,
-                            onCheckedChange = { isSteam = it },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "Steam 账户",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Steam 使用自定义 TOTP 格式生成 5 位字母代码",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
                     Text(
-                        text = "标准 TOTP 密钥，由字母和数字组成（Base32 编码）",
+                        text = when (accountType) {
+                            "STEAM" -> "Steam 密钥，由字母和数字组成（Base32 编码）"
+                            "HOTP" -> "HOTP 密钥，每次使用后计数器 +1"
+                            else -> "标准 TOTP 密钥，由字母和数字组成（Base32 编码）"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -233,39 +256,28 @@ fun AddAccountSheet(
                     Button(
                         onClick = {
                             if (isFormValid) {
-                                onAdd(issuer, name, secret, isSteam)
+                                onAdd(issuer, name, secret, accountType)
                                 onDismiss()
                             }
                         },
                         enabled = isFormValid,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
                         shape = MaterialTheme.shapes.medium,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        Text(
-                            "保存账户",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp
-                        )
+                        Text("保存账户", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                     }
                 }
 
                 1 -> {
-                    // QR Scanner
                     QRScanner(
-                        onCodeScanned = { uri ->
-                            onScannedUri(uri)
-                        },
+                        onCodeScanned = { uri -> onScannedUri(uri) },
                         isActive = qrActive,
                         modifier = Modifier.fillMaxWidth()
                     )
-
                     Spacer(modifier = Modifier.height(12.dp))
-
                     Text(
                         text = "将二维码置于框内自动识别",
                         style = MaterialTheme.typography.bodyMedium,
