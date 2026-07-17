@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlinx.coroutines.delay
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -25,7 +26,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.auth2fa.app.ui.theme.RoundedLg
 import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
@@ -41,6 +41,7 @@ fun QRScanner(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val scanner = remember { BarcodeScanning.getClient() }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -52,6 +53,22 @@ fun QRScanner(
 
     var scannedUri by remember { mutableStateOf<String?>(null) }
     var scanningError by remember { mutableStateOf(false) }
+
+    // Clean up camera resources on disposal
+    DisposableEffect(Unit) {
+        onDispose {
+            scanner.close()
+            cameraExecutor.shutdown()
+        }
+    }
+
+    // Allow re-scanning after a successful scan
+    LaunchedEffect(scannedUri) {
+        if (scannedUri != null) {
+            delay(2000L)
+            scannedUri = null
+        }
+    }
 
     Box(
         modifier = modifier
@@ -85,8 +102,6 @@ fun QRScanner(
                             .setTargetResolution(Size(480, 480))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
-
-                        val scanner = BarcodeScanning.getClient()
 
                         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                             val rotation = imageProxy.imageInfo.rotationDegrees

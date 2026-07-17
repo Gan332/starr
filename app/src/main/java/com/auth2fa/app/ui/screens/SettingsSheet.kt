@@ -1,6 +1,5 @@
 package com.auth2fa.app.ui.screens
 
-import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.auth2fa.app.ui.theme.*
@@ -21,14 +19,16 @@ import com.auth2fa.app.ui.theme.*
 @Composable
 fun SettingsSheet(
     isDarkTheme: Boolean,
+    biometricEnabled: Boolean,
+    autoLockEnabled: Boolean,
     accountCount: Int,
     onToggleTheme: () -> Unit,
+    onToggleBiometric: (Boolean) -> Unit,
+    onToggleAutoLock: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -79,6 +79,52 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Security section
+            Text(
+                text = "安全",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsItem(
+                icon = Icons.Default.Fingerprint,
+                title = "生物识别锁",
+                subtitle = "每次打开应用时需要验证身份",
+                trailing = {
+                    Switch(
+                        checked = biometricEnabled,
+                        onCheckedChange = { onToggleBiometric(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                },
+                onClick = { onToggleBiometric(!biometricEnabled) }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Lock,
+                title = "自动锁定",
+                subtitle = "应用切换至后台时自动锁定",
+                trailing = {
+                    Switch(
+                        checked = autoLockEnabled,
+                        onCheckedChange = { onToggleAutoLock(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                },
+                onClick = { onToggleAutoLock(!autoLockEnabled) }
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             // Data section
             Text(
                 text = "数据",
@@ -118,7 +164,7 @@ fun SettingsSheet(
             SettingsItem(
                 icon = Icons.Default.Security,
                 title = "Authenticator",
-                subtitle = "v1.0.0 · 本地 TOTP 验证器",
+                subtitle = "v1.1.0 · 本地 TOTP 验证器",
                 enabled = false
             )
 

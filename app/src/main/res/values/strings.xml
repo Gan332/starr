@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Authenticator</string>
+    <string name="widget_name">TOTP 验证码</string>
+    <string name="widget_description">快速查看 TOTP 验证码</string>
 </resources>

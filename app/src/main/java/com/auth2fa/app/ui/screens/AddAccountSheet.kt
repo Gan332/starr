@@ -1,6 +1,5 @@
 package com.auth2fa.app.ui.screens
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,7 +31,7 @@ import com.auth2fa.app.ui.theme.*
 @Composable
 fun AddAccountSheet(
     onDismiss: () -> Unit,
-    onAdd: (issuer: String, name: String, secret: String) -> Unit,
+    onAdd: (issuer: String, name: String, secret: String, isSteam: Boolean) -> Unit,
     onScannedUri: (String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -43,6 +42,7 @@ fun AddAccountSheet(
     var name by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     var isSecretValid by remember { mutableStateOf(true) }
+    var isSteam by remember { mutableStateOf(false) }
     val isFormValid = issuer.isNotBlank() && secret.isNotBlank()
 
     // QR scan active state
@@ -183,7 +183,7 @@ fun AddAccountSheet(
                         keyboardActions = KeyboardActions(onDone = {
                             focusManager.clearFocus()
                             if (isFormValid) {
-                                onAdd(issuer, name, secret)
+                                onAdd(issuer, name, secret, isSteam)
                                 onDismiss()
                             }
                         }),
@@ -191,6 +191,37 @@ fun AddAccountSheet(
                     )
 
                     Spacer(modifier = Modifier.height(6.dp))
+
+                    // Steam toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = isSteam,
+                            onCheckedChange = { isSteam = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Steam 账户",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Steam 使用自定义 TOTP 格式生成 5 位字母代码",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     Text(
                         text = "标准 TOTP 密钥，由字母和数字组成（Base32 编码）",
                         style = MaterialTheme.typography.bodySmall,
@@ -202,7 +233,7 @@ fun AddAccountSheet(
                     Button(
                         onClick = {
                             if (isFormValid) {
-                                onAdd(issuer, name, secret)
+                                onAdd(issuer, name, secret, isSteam)
                                 onDismiss()
                             }
                         },
@@ -228,7 +259,6 @@ fun AddAccountSheet(
                     QRScanner(
                         onCodeScanned = { uri ->
                             onScannedUri(uri)
-                            // Will dismiss via the callback chain
                         },
                         isActive = qrActive,
                         modifier = Modifier.fillMaxWidth()

@@ -4,17 +4,20 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * TOTP (RFC 6238) implementation using HMAC-SHA1.
+ * Steam TOTP implementation.
+ * Steam uses a custom TOTP: 30s period, but instead of returning N digits,
+ * it returns a 5-character alphanumeric code generated from the hash.
  */
-object TOTPGenerator {
+object SteamTOTPGenerator {
 
     private const val HMAC_ALGORITHM = "HmacSHA1"
     private const val BASE32_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    private val STEAM_CHARS = "23456789BCDFGHJKMNPQRTVWXY".toCharArray()
 
     /**
      * Decode a Base32-encoded string to a byte array.
      */
-    fun base32Decode(secret: String): ByteArray {
+    private fun base32Decode(secret: String): ByteArray {
         val cleaned = secret.replace("[^A-Za-z2-7]".toRegex(), "").uppercase()
         val output = mutableListOf<Byte>()
         var buffer = 0
@@ -34,27 +37,19 @@ object TOTPGenerator {
     }
 
     /**
-     * Generate a TOTP code for the given secret.
+     * Generate a Steam TOTP code.
      * @param secret Base32-encoded secret key
-     * @param digits Number of digits (default 6)
-     * @param period Time period in seconds (default 30)
-     * @param currentTimeSeconds Current unix time in seconds (defaults to system clock)
-     * @return The TOTP code as a string
+     * @param currentTimeSeconds Current unix time in seconds
+     * @return 5-character Steam alphanumeric code
      */
     fun generate(
         secret: String,
-        digits: Int = 6,
-        period: Int = 30,
         currentTimeSeconds: Long = System.currentTimeMillis() / 1000
     ): String {
+        // Steam uses a 30-second period like standard TOTP
+        val period = 30L
         val counter = currentTimeSeconds / period
-        return generateForCounter(secret, counter, digits)
-    }
 
-    /**
-     * Generate a TOTP code for a given counter value.
-     */
-    private fun generateForCounter(secret: String, counter: Long, digits: Int): String {
         // Build 8-byte big-endian counter
         val counterBytes = ByteArray(8)
         var temp = counter
@@ -70,32 +65,38 @@ object TOTPGenerator {
         mac.init(keySpec)
         val hash = mac.doFinal(counterBytes)
 
-        // Dynamic truncation (RFC 4226)
-        val offset = hash[hash.size - 1].toInt() and 0xF
-        val binary = ((hash[offset].toInt() and 0x7F) shl 24) or
-                     ((hash[offset + 1].toInt() and 0xFF) shl 16) or
-                     ((hash[offset + 2].toInt() and 0xFF) shl 8) or
-                     (hash[offset + 3].toInt() and 0xFF)
+        // Steam-style code generation
+        // Start at the offset byte (last nibble of hash)
+        var offset = hash[hash.size - 1].toInt() and 0xF
+        var fullCode = 0
+        for (i in 0 until 4) {
+            fullCode = (fullCode shl 8) or (hash[offset + i].toInt() and 0xFF)
+        }
+        fullCode = fullCode and 0x7FFFFFFF
 
-        val otp = binary % Math.pow(10.0, digits.toDouble()).toInt()
-        return otp.toString().padStart(digits, '0')
+        // Generate 5-character Steam code
+        val code = StringBuilder()
+        var remaining = fullCode
+        for (i in 0 until 5) {
+            code.append(STEAM_CHARS[remaining % STEAM_CHARS.size])
+            remaining /= STEAM_CHARS.size
+        }
+        return code.toString()
     }
 
     /**
      * Get remaining seconds in the current time period.
-     * @param period Time period in seconds (default 30)
-     * @param currentTimeSeconds Current unix time in seconds (defaults to system clock)
      */
-    fun getTimeRemaining(period: Int = 30, currentTimeSeconds: Long = System.currentTimeMillis() / 1000): Int {
+    fun getTimeRemaining(currentTimeSeconds: Long = System.currentTimeMillis() / 1000): Int {
+        val period = 30
         return period - (currentTimeSeconds % period).toInt()
     }
 
     /**
      * Get progress (0.0 - 1.0) through the current time period.
-     * @param period Time period in seconds (default 30)
-     * @param currentTimeSeconds Current unix time in seconds (defaults to system clock)
      */
-    fun getProgress(period: Int = 30, currentTimeSeconds: Long = System.currentTimeMillis() / 1000): Float {
+    fun getProgress(currentTimeSeconds: Long = System.currentTimeMillis() / 1000): Float {
+        val period = 30
         return (currentTimeSeconds % period).toFloat() / period
     }
 }
